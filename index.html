@@ -542,6 +542,85 @@ button { cursor: pointer; }
 }
 .thumb-del:hover { background: var(--red); }
 
+
+.upload-closed-box {
+  border: 1px solid var(--border);
+  background: #F8FAFF;
+  border-radius: var(--r-l);
+  padding: 16px;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.drop-zone.disabled {
+  cursor: not-allowed;
+  background: #F3F4F6;
+  border-color: var(--border-l);
+  opacity: .78;
+}
+.drop-zone.disabled:hover { background: #F3F4F6; border-color: var(--border-l); }
+
+/* ── 응시 화면: 캡처 참고 분할 화면 ── */
+.exam-split {
+  display: grid;
+  grid-template-columns: minmax(300px, 42%) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.ref-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 110px);
+  display: flex;
+  flex-direction: column;
+}
+.ref-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ref-tab {
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--text-3);
+  border-radius: var(--r);
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ref-tab.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.ref-main {
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  background: var(--bg);
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.ref-main img {
+  width: 100%;
+  max-height: calc(100vh - 260px);
+  object-fit: contain;
+  display: block;
+  cursor: zoom-in;
+}
+.ref-empty {
+  padding: 32px 18px;
+  text-align: center;
+  color: var(--text-4);
+  font-size: 13px;
+  font-weight: 600;
+}
+@media(max-width: 900px) {
+  .exam-split { grid-template-columns: 1fr; }
+  .ref-panel { position: static; max-height: none; }
+  .ref-main img { max-height: 420px; }
+}
+
 /* ── 문제 ── */
 .question {
   background: var(--paper);
@@ -643,6 +722,38 @@ tbody tr:hover td { background: #FAFBFF; }
   box-shadow: var(--shadow-s);
 }
 .class-card b { font-size: 15px; color: var(--text); display: block; margin-bottom: 4px; }
+
+
+.class-open-list { display: grid; gap: 12px; }
+.class-open-row {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-s);
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 70px 1fr 1fr;
+  gap: 14px;
+  align-items: center;
+}
+.class-open-no { font-size: 18px; font-weight: 700; color: var(--text); }
+.open-control {
+  border: 1px solid var(--border);
+  background: #F8FAFF;
+  border-radius: var(--r);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.open-control-label { font-size: 13px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+.open-control-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+@media(max-width: 760px) {
+  .class-open-row { grid-template-columns: 1fr; }
+  .open-control { flex-direction: column; align-items: flex-start; }
+}
 
 /* ── 폼 그리드 ── */
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -855,7 +966,7 @@ tbody tr:hover td { background: #FAFBFF; }
                 <option value="1">1반</option><option value="2">2반</option><option value="3">3반</option>
                 <option value="4">4반</option><option value="5">5반</option><option value="6">6반</option>
                 <option value="7">7반</option><option value="8">8반</option><option value="9">9반</option>
-                <option value="10">10반</option><option value="11">11반</option><option value="12">12반</option>
+                <option value="10">10반</option><option value="11">11반</option><option value="12">12반</option><option value="13">13반</option>
               </select>
             </div>
             <div class="field">
@@ -950,13 +1061,22 @@ let sb = null;
 if (!TEST_MODE && window.supabase) sb = supabase.createClient(SB_URL, SB_KEY);
 
 const ADMIN_ID = 'admin', ADMIN_PW = 'gm11154';
+const CLASS_COUNT = 13;
+const CLASS_LIST = Array.from({length:CLASS_COUNT}, (_,i) => String(i+1));
+function classNum(v) { return Number(String(v).replace(/[^0-9]/g, '')) || 0; }
+function sortByClassNo(a,b) { return classNum(a.classNo ?? a.class ?? a) - classNum(b.classNo ?? b.class ?? b); }
+function normalizeClassRows(rows=[]) {
+  const map = {};
+  rows.forEach(r => { map[String(r.classNo ?? r.class)] = r; });
+  return CLASS_LIST.map(c => ({ classNo:c, isOpen:false, uploadOpen:false, ...(map[c]||{}) })).sort(sortByClassNo);
+}
 
 const DEMO = {
   users: [
     { id:'admin', authId:'admin', loginId:'admin', pw:'gm11154', name:'김채연T', classNo:'admin', role:'admin' },
     { id:'s1', authId:'s1auth', loginId:'2621101', pw:'123456', name:'홍길동', classNo:'1', role:'student' }
   ],
-  classSettings: Array.from({length:12}, (_,i) => ({ classNo: String(i+1), isOpen: i===0 })),
+  classSettings: CLASS_LIST.map((c,i) => ({ classNo: c, isOpen: i===0, uploadOpen: false })),
   questions: [
     { id:'q1', no:1, score:10, text:'[문제 1]\n다음 분석 기법의 이름을 영어로 쓰시오.\n(정답 예: regression)', imageUrl:'', is_active:true, accepted:['regression','linear regression'] },
     { id:'q2', no:2, score:15, text:'[문제 2]\n의사결정트리에서 과적합을 방지하는 대표 방법을 쓰시오.', imageUrl:'', is_active:true, accepted:['pruning','가지치기'] },
@@ -966,6 +1086,7 @@ const DEMO = {
 };
 
 let currentUser = null, isAdmin = false, answers = {}, examActive = false, currentAdminTab = 'dashboard';
+let examRefImages = [], examRefIdx = 0;
 
 const $ = id => document.getElementById(id);
 function uid(p='id') { return p + '-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -1135,9 +1256,13 @@ async function logout() {
   $('userLabel').textContent = '';
 }
 
-function showOnly(ids, active) { ids.forEach(id => $(id).classList.toggle('on', id===active)); }
+function showOnly(ids, active) {
+  document.querySelectorAll('.section').forEach(sec => sec.classList.remove('on'));
+  ids.forEach(id => { if ($(id)) $(id).classList.toggle('on', id===active); });
+}
 
 async function showStudent(t) {
+  if (isAdmin) return;
   ['nav-home','nav-upload','nav-exam','nav-result'].forEach(id => $(id).classList.remove('on'));
   $('nav-'+t).classList.add('on');
   showOnly(['sec-home','sec-upload','sec-exam','sec-result'], 'sec-'+t);
@@ -1147,9 +1272,10 @@ async function showStudent(t) {
 }
 
 async function showAdmin(t) {
+  if (!isAdmin) return;
   currentAdminTab = t;
   ['nav-dashboard','nav-questions','nav-classes','nav-submissions','nav-excel','nav-logs','nav-students']
-    .forEach(id => $(id).classList.remove('on'));
+    .forEach(id => { if ($(id)) $(id).classList.remove('on'); });
   $('nav-'+t).classList.add('on');
   showOnly(['sec-dashboard','sec-questions','sec-classes','sec-submissions','sec-excel','sec-logs','sec-students'], 'sec-'+t);
   renderAdmin(t);
@@ -1157,9 +1283,11 @@ async function showAdmin(t) {
 
 async function studentState() {
   if (TEST_MODE) {
-    const open = DEMO.classSettings.find(c => c.classNo===currentUser.classNo)?.isOpen;
+    const classRow = DEMO.classSettings.find(c => c.classNo===currentUser.classNo);
+    const open = !!classRow?.isOpen;
     return {
       open,
+      uploadOpen: !!classRow?.uploadOpen,
       images:     DEMO.images[currentUser.id] || [],
       questions:  DEMO.questions.filter(q => q.is_active !== false),
       submission: DEMO.submissions.find(s => s.studentId===currentUser.id),
@@ -1182,7 +1310,7 @@ async function studentState() {
     const { data:q } = await sb.from('questions').select('*').eq('is_active', true).order('order_num');
     questions = (q||[]).map(x => ({ id:x.id, no:x.order_num, score:x.score, text:x.text, imageUrl:x.image_url }));
   }
-  return { open:!!cs?.is_open, images:signedImgs, questions, submission:sub, logs:logs||[] };
+  return { open:!!cs?.is_open, uploadOpen:!!cs?.upload_open, images:signedImgs, questions, submission:sub, logs:logs||[] };
 }
 
 async function renderStudent(tab, data) {
@@ -1199,6 +1327,7 @@ function renderHome(data) {
     <p class="page-desc">수행평가 진행 상태를 확인하세요.</p>
     <div class="stats">
       <div class="stat"><div class="stat-num">${data.images.length}</div><div class="stat-label">업로드한 캡처</div></div>
+      <div class="stat"><div class="stat-num">${data.uploadOpen ? '가능' : '마감'}</div><div class="stat-label">캡처 업로드</div></div>
       <div class="stat"><div class="stat-num">${data.open ? '공개' : '대기'}</div><div class="stat-label">문제 공개 상태</div></div>
       <div class="stat"><div class="stat-num">${sub ? '완료' : '미제출'}</div><div class="stat-label">제출 상태</div></div>
       <div class="stat"><div class="stat-num">${data.logs.length}</div><div class="stat-label">이탈 로그</div></div>
@@ -1210,7 +1339,7 @@ function renderHome(data) {
       <div class="card-head"><div class="card-title">응시 안내</div></div>
       <div class="card-body">
         <ul style="padding-left:20px;line-height:2.1;font-size:13px;color:var(--text-2)">
-          <li>Orange3 실습 캡처는 최대 <b>10장</b>까지 업로드할 수 있습니다.</li>
+          <li>Orange3 실습 캡처는 선생님이 업로드 기간을 열어둔 경우에만 최대 <b>10장</b>까지 업로드할 수 있습니다.</li>
           <li>문제는 반별 수행평가 시간에만 공개됩니다.</li>
           <li>최종 제출은 <b>1회</b>만 가능하며, 제출 후 수정할 수 없습니다.</li>
           <li>평가 중 탭 전환과 붙여넣기 시도는 로그로 기록됩니다.</li>
@@ -1221,39 +1350,52 @@ function renderHome(data) {
 
 function renderUpload(data) {
   const sub = data.submission;
+  const canModify = !!data.uploadOpen && !sub;
+  const statusText = data.uploadOpen ? '업로드 가능' : '업로드 마감';
   $('sec-upload').innerHTML = `
     <h2 class="page-title">캡처 업로드</h2>
-    <p class="page-desc">본인이 실습한 Orange3 화면 캡처를 업로드하세요.</p>
+    <p class="page-desc">본인이 실습한 Orange3 화면 캡처를 업로드하거나 확인합니다.</p>
+    <div class="notice ${data.uploadOpen ? 'info' : 'warn'}">
+      ${data.uploadOpen
+        ? '📢 현재 캡처 자료 업로드 기간입니다. 제출 전까지 이미지를 추가하거나 삭제할 수 있습니다.'
+        : '🔒 캡처 자료 업로드 기간이 닫혔습니다. 기존에 올린 이미지는 확인만 가능하며 추가·삭제할 수 없습니다.'}
+    </div>
     <div class="card">
       <div class="card-head">
         <div class="card-title">이미지 업로드</div>
-        <span class="badge blue">${data.images.length}/10장</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="badge ${data.uploadOpen?'green':'yellow'}">${statusText}</span>
+          <span class="badge blue">${data.images.length}/10장</span>
+        </div>
       </div>
       <div class="card-body">
-        <div class="upload-panel">
-          <label class="drop-zone" id="dropZone">
-            <div>
-              <div class="drop-icon">📁</div>
-              <b>이미지 선택 또는 드래그</b>
-              <span>PNG/JPG · 최대 10장 · 제출 후에는 추가·삭제할 수 없습니다.</span>
-            </div>
-            <input id="fileInput" class="file-input" type="file" multiple accept="image/*"
-              ${sub ? 'disabled' : ''} onchange="handleImgs(event)">
-          </label>
-        </div>
+        ${canModify ? `
+          <div class="upload-panel">
+            <label class="drop-zone" id="dropZone">
+              <div>
+                <div class="drop-icon">📁</div>
+                <b>이미지 선택 또는 드래그</b>
+                <span>PNG/JPG · 최대 10장 · 업로드 기간 중에만 추가·삭제 가능</span>
+              </div>
+              <input id="fileInput" class="file-input" type="file" multiple accept="image/*" onchange="handleImgs(event)">
+            </label>
+          </div>` : `
+          <div class="upload-closed-box">
+            ${sub ? '제출이 완료되어 캡처 이미지를 수정할 수 없습니다.' : '업로드 기간이 닫혀 있어 캡처 이미지를 추가하거나 삭제할 수 없습니다.'}
+          </div>`}
         <div class="image-grid">
           ${data.images.length
             ? data.images.map((im,i) => `
                 <div class="thumb">
                   <img src="${im.url}" onclick="openFs('${im.url}')">
                   <span class="thumb-num">${i+1}</span>
-                  ${sub ? '' : `<button class="thumb-del" onclick="deleteImg('${im.id}','${im.path||''}')">×</button>`}
+                  ${canModify ? `<button class="thumb-del" onclick="deleteImg('${im.id}','${im.path||''}')">×</button>` : ''}
                 </div>`).join('')
             : '<div class="empty">아직 업로드한 이미지가 없습니다.</div>'}
         </div>
       </div>
     </div>`;
-  setTimeout(() => bindDropZone(), 0);
+  if (canModify) setTimeout(() => bindDropZone(), 0);
 }
 
 function bindDropZone() {
@@ -1269,6 +1411,8 @@ async function handleImgs(e) { await handleFileList(e.target.files); e.target.va
 async function handleFileList(files) {
   if (!currentUser?.id || !currentUser?.authId) return alert('로그인 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
   const data = await studentState();
+  if (!data.uploadOpen) return alert('현재 캡처 자료 업로드 기간이 아닙니다. 기존 이미지는 확인만 가능합니다.');
+  if (data.submission) return alert('이미 제출 완료되어 캡처 이미지를 수정할 수 없습니다.');
   const list = Array.from(files||[]).filter(f => f.type.startsWith('image/'));
   if (data.images.length + list.length > 10) return alert('최대 10장까지 업로드할 수 있습니다.');
   if (TEST_MODE) {
@@ -1288,6 +1432,9 @@ async function handleFileList(files) {
 }
 
 async function deleteImg(id, path) {
+  const data = await studentState();
+  if (!data.uploadOpen) return alert('현재 캡처 자료 업로드 기간이 아닙니다. 삭제할 수 없습니다.');
+  if (data.submission) return alert('이미 제출 완료되어 캡처 이미지를 수정할 수 없습니다.');
   if (!confirm('삭제할까요?')) return;
   if (TEST_MODE) {
     DEMO.images[currentUser.id] = (DEMO.images[currentUser.id]||[]).filter(x => x.id!==id);
@@ -1311,25 +1458,52 @@ function renderExam(data) {
     $('sec-exam').innerHTML = `<h2 class="page-title">수행평가 응시</h2><p class="page-desc">이미 제출했습니다.</p><div class="empty">제출 확인 메뉴에서 답안을 확인하세요.</div>`;
     return;
   }
+  examRefImages = data.images || [];
+  if (examRefIdx >= examRefImages.length) examRefIdx = 0;
+  const refHtml = examRefImages.length ? `
+    <div class="ref-tabs" id="refTabs">
+      ${examRefImages.map((im,i)=>`<button class="ref-tab ${i===examRefIdx?'on':''}" onclick="setExamRefImage(${i})">캡처 ${i+1}</button>`).join('')}
+    </div>
+    <div class="ref-main">
+      <img id="examRefImg" src="${examRefImages[examRefIdx].url}" onclick="openFs(this.src)" alt="참고 캡처">
+    </div>
+    <p class="hint" style="margin-top:8px">캡처 탭을 눌러 이미지를 바꾸고, 이미지를 클릭하면 크게 볼 수 있습니다.</p>` : `
+    <div class="ref-empty">업로드한 캡처 이미지가 없습니다.<br>필요한 캡처는 업로드 기간에 미리 등록하세요.</div>`;
+
   $('sec-exam').innerHTML = `
     <h2 class="page-title">수행평가 응시</h2>
-    <p class="page-desc">문제를 읽고 답안을 작성한 후 최종 제출하세요.</p>
-    <div class="notice warn">⚠ 응시 중 탭 전환 및 붙여넣기 시도가 기록됩니다. 필요한 경우 캡처 이미지를 참고하세요.</div>
-    ${data.questions.map(q => `
-      <div class="question">
-        <div class="q-head">
-          <div class="q-no">${q.no}</div>
-          <div class="q-title">문제 ${q.no}</div>
-          <div class="q-score">${q.score}점</div>
-        </div>
-        <div class="q-body">
-          <div class="q-text">${esc(q.text)}</div>
-          ${q.imageUrl ? `<img class="q-img" src="${q.imageUrl}">` : ''}
-          <textarea class="answer" placeholder="답안을 작성하세요."
-            oninput="answers['${q.id}']=this.value">${answers[q.id]||''}</textarea>
-        </div>
-      </div>`).join('')}
-    <button class="btn btn-green btn-full" style="margin-top:8px" onclick="submitExam()">최종 제출하기</button>`;
+    <p class="page-desc">왼쪽의 내 캡처 이미지를 참고하며 오른쪽 문제에 답안을 작성하세요.</p>
+    <div class="notice warn">⚠ 응시 중 탭 전환 및 붙여넣기 시도가 기록됩니다.</div>
+    <div class="exam-split">
+      <aside class="card ref-panel">
+        <div class="card-head"><div class="card-title">내 캡처 참고 화면</div><span class="badge blue">${examRefImages.length}/10장</span></div>
+        <div class="card-body">${refHtml}</div>
+      </aside>
+      <div>
+        ${data.questions.map(q => `
+          <div class="question">
+            <div class="q-head">
+              <div class="q-no">${q.no}</div>
+              <div class="q-title">문제 ${q.no}</div>
+              <div class="q-score">${q.score}점</div>
+            </div>
+            <div class="q-body">
+              <div class="q-text">${esc(q.text)}</div>
+              ${q.imageUrl ? `<img class="q-img" src="${q.imageUrl}">` : ''}
+              <textarea class="answer" placeholder="답안을 작성하세요."
+                oninput="answers['${q.id}']=this.value">${answers[q.id]||''}</textarea>
+            </div>
+          </div>`).join('')}
+        <button class="btn btn-green btn-full" style="margin-top:8px" onclick="submitExam()">최종 제출하기</button>
+      </div>
+    </div>`;
+}
+
+function setExamRefImage(i) {
+  examRefIdx = i;
+  const img = $('examRefImg');
+  if (img && examRefImages[i]) img.src = examRefImages[i].url;
+  document.querySelectorAll('.ref-tab').forEach((b,idx)=>b.classList.toggle('on', idx===i));
 }
 
 async function submitExam() {
@@ -1407,9 +1581,9 @@ async function adminQuestions() {
   return (q||[]).map(x => ({ id:x.id, no:x.order_num, score:x.score, text:x.text, imageUrl:x.image_url, is_active:x.is_active, accepted:amap[x.id]||[] }));
 }
 async function adminClasses() {
-  if (TEST_MODE) return DEMO.classSettings;
-  const { data } = await sb.from('class_settings').select('*').order('class');
-  return (data||[]).map(c => ({ classNo:c.class, isOpen:c.is_open }));
+  if (TEST_MODE) return normalizeClassRows(DEMO.classSettings);
+  const { data } = await sb.from('class_settings').select('*');
+  return normalizeClassRows((data||[]).map(c => ({ classNo:c.class, isOpen:!!c.is_open, uploadOpen:!!c.upload_open })));
 }
 async function adminSubs() {
   if (TEST_MODE) return DEMO.submissions.map(s => ({ ...s, students:{ class:s.classNo, student_id:s.studentNo, name:s.name }, submitted_at:s.submittedAt, tab_log_count:s.logCount }));
@@ -1442,8 +1616,8 @@ async function renderDashboard() {
     <div class="stats">
       <div class="stat"><div class="stat-num">${st.length}</div><div class="stat-label">전체 학생</div></div>
       <div class="stat"><div class="stat-num">${subs.length}</div><div class="stat-label">제출 완료</div></div>
-      <div class="stat"><div class="stat-num">${cls.filter(c=>c.isOpen).length}</div><div class="stat-label">오픈된 반</div></div>
-      <div class="stat"><div class="stat-num">${logs.length}</div><div class="stat-label">이탈 감지</div></div>
+      <div class="stat"><div class="stat-num">${cls.filter(c=>c.isOpen).length}</div><div class="stat-label">수행평가 공개 반</div></div>
+      <div class="stat"><div class="stat-num">${cls.filter(c=>c.uploadOpen).length}</div><div class="stat-label">캡처 업로드 오픈 반</div></div>
     </div>
     <div class="card">
       <div class="card-head">
@@ -1452,8 +1626,8 @@ async function renderDashboard() {
       </div>
       <div class="card-body table-wrap">
         <table>
-          <thead><tr><th>반</th><th>오픈 상태</th></tr></thead>
-          <tbody>${cls.map(c=>`<tr><td>${c.classNo}반</td><td><span class="badge ${c.isOpen?'green':''}">${c.isOpen?'공개 중':'비공개'}</span></td></tr>`).join('')}</tbody>
+          <thead><tr><th>반</th><th>캡처 업로드</th><th>수행평가 공개</th></tr></thead>
+          <tbody>${cls.map(c=>`<tr><td>${c.classNo}반</td><td><span class="badge ${c.uploadOpen?'green':'yellow'}">${c.uploadOpen?'오픈':'잠김'}</span></td><td><span class="badge ${c.isOpen?'green':'yellow'}">${c.isOpen?'공개':'비공개'}</span></td></tr>`).join('')}</tbody>
         </table>
       </div>
     </div>`;
@@ -1549,24 +1723,51 @@ async function renderClasses() {
   const cls = await adminClasses();
   $('sec-classes').innerHTML = `
     <h2 class="page-title">반별 오픈 관리</h2>
-    <p class="page-desc">반별로 수행평가 공개 여부를 설정합니다.</p>
-    <div class="class-list">
+    <p class="page-desc">캡처 업로드와 수행평가 공개를 반별로 설정합니다.</p>
+    <div class="notice info">📸 <b>캡처 업로드</b>: 수행평가 전날 미리 열어두세요. &nbsp; | &nbsp; 📝 <b>수행평가 공개</b>: 해당 반 시험 시간에 열고 끝나면 닫으세요.</div>
+    <div class="class-open-list">
       ${cls.map(c => `
-        <div class="class-card">
-          <div>
-            <b>${c.classNo}반</b>
-            <span class="badge ${c.isOpen?'green':'yellow'}">${c.isOpen?'공개 중':'비공개'}</span>
+        <div class="class-open-row">
+          <div class="class-open-no">${c.classNo}반</div>
+          <div class="open-control">
+            <span class="open-control-label">📸 캡처 업로드</span>
+            <span class="open-control-actions">
+              <span class="badge ${c.uploadOpen?'green':'yellow'}">${c.uploadOpen?'오픈':'잠김'}</span>
+              <button class="btn ${c.uploadOpen?'btn-red':'btn-primary'} btn-sm" onclick="toggleUploadClass('${c.classNo}',${c.uploadOpen})">${c.uploadOpen?'닫기':'열기'}</button>
+            </span>
           </div>
-          <button class="btn ${c.isOpen?'btn-red':'btn-primary'} btn-sm" onclick="toggleClass('${c.classNo}',${c.isOpen})">
-            ${c.isOpen?'닫기':'열기'}
-          </button>
+          <div class="open-control">
+            <span class="open-control-label">📝 수행평가 공개</span>
+            <span class="open-control-actions">
+              <span class="badge ${c.isOpen?'green':'yellow'}">${c.isOpen?'공개':'비공개'}</span>
+              <button class="btn ${c.isOpen?'btn-red':'btn-primary'} btn-sm" onclick="toggleClass('${c.classNo}',${c.isOpen})">${c.isOpen?'닫기':'열기'}</button>
+            </span>
+          </div>
         </div>`).join('')}
     </div>`;
 }
 
+async function toggleUploadClass(classNo, open) {
+  if (!isAdmin) return;
+  if (TEST_MODE) {
+    const row = DEMO.classSettings.find(c=>c.classNo===classNo);
+    if (row) row.uploadOpen = !open;
+  } else {
+    const { error } = await sb.from('class_settings').upsert({ class:classNo, upload_open:!open, updated_at:new Date().toISOString() }, { onConflict:'class' });
+    if (error) return alert('캡처 업로드 설정 실패: ' + error.message);
+  }
+  renderClasses();
+}
+
 async function toggleClass(classNo, open) {
-  if (TEST_MODE) { DEMO.classSettings.find(c=>c.classNo===classNo).isOpen = !open; }
-  else await sb.from('class_settings').upsert({ class:classNo, is_open:!open }, { onConflict:'class' });
+  if (!isAdmin) return;
+  if (TEST_MODE) {
+    const row = DEMO.classSettings.find(c=>c.classNo===classNo);
+    if (row) row.isOpen = !open;
+  } else {
+    const { error } = await sb.from('class_settings').upsert({ class:classNo, is_open:!open, updated_at:new Date().toISOString() }, { onConflict:'class' });
+    if (error) return alert('수행평가 공개 설정 실패: ' + error.message);
+  }
   renderClasses();
 }
 
@@ -1593,7 +1794,7 @@ async function renderSubs() {
             <label>반 필터</label>
             <select id="filterClass" class="select" onchange="drawSubTable()" style="width:120px">
               <option value="">전체</option>
-              ${Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}반</option>`).join('')}
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
             </select>
           </div>
           <div class="field">
