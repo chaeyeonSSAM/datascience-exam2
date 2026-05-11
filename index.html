@@ -1080,18 +1080,34 @@ async function register() {
     return enter(u);
   }
 
-  const { data: dup } = await sb.from('students').select('id').eq('student_id', id).maybeSingle();
-  if (dup) return alertAuth('이미 가입된 학번입니다.');
+  // 학번 중복 확인 — Supabase Auth로 먼저 가입 시도 전에 체크
+  // (RLS 미적용 anon 조회 실패 대비: 오류 무시하고 signUp에서 UNIQUE 제약으로 최종 차단)
+  try {
+    const { data: dup } = await sb.from('students').select('id').eq('student_id', id).maybeSingle();
+    if (dup) return alertAuth('이미 가입된 학번입니다.');
+  } catch (_) { /* RLS로 조회 실패 시 무시 — signUp 후 DB UNIQUE 제약이 최종 차단 */ }
 
+  // Auth 계정 생성
   const { data, error } = await sb.auth.signUp({ email:`${id}@gwangmun.edu`, password:pw });
   if (error) return alertAuth('회원가입 실패: ' + error.message);
 
+  // signUp 직후 user 객체 null 방어 (이메일 인증 필요 환경)
+  if (!data?.user) {
+    return alertAuth('이메일 인증이 필요합니다. Supabase에서 "Auto Confirm" 또는 "Confirm user"를 설정해 주세요.', 'warn');
+  }
+
+  // students 테이블에 저장
   const { error: insErr } = await sb.from('students').insert({
     auth_id: data.user.id, student_id: id, name, class: classNo
   });
-  if (insErr) return alertAuth('학생 정보 저장 실패: ' + insErr.message);
+  if (insErr) {
+    // Auth 계정만 생성되고 students 저장 실패 시 Auth 계정 삭제 불가(client-side 제한)
+    // → 안내 메시지만 표시
+    return alertAuth('학생 정보 저장 실패: ' + insErr.message + ' (관리자에게 문의하세요.)');
+  }
 
-  enter({ id:null, authId:data.user.id, loginId:id, name, classNo, role:'student' });
+  // restoreSession으로 students.id를 DB에서 직접 읽어 currentUser에 정확히 세팅
+  // enter(id:null)을 먼저 호출하면 currentUser.id=null 상태로 앱이 열리므로 절대 하지 않음
   await restoreSession(data.user);
 }
 
@@ -1251,6 +1267,7 @@ function bindDropZone() {
 async function handleImgs(e) { await handleFileList(e.target.files); e.target.value = ''; }
 
 async function handleFileList(files) {
+  if (!currentUser?.id || !currentUser?.authId) return alert('로그인 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
   const data = await studentState();
   const list = Array.from(files||[]).filter(f => f.type.startsWith('image/'));
   if (data.images.length + list.length > 10) return alert('최대 10장까지 업로드할 수 있습니다.');
@@ -1261,10 +1278,11 @@ async function handleFileList(files) {
   for (let i = 0; i < list.length; i++) {
     const f = list[i];
     const ext = f.name.split('.').pop();
-    const path = `${currentUser.authId}/${Date.now()}-${i}.${ext}`;
-    const { error: upErr } = await sb.storage.from('student-images').upload(path, f, { upsert:false });
+    const storagePath = `${currentUser.authId}/${Date.now()}-${i}.${ext}`;
+    const { error: upErr } = await sb.storage.from('student-images').upload(storagePath, f, { upsert:false });
     if (upErr) return alert('업로드 실패: ' + upErr.message);
-    await sb.from('student_images').insert({ student_id:currentUser.id, path, order_index:data.images.length+i });
+    const { error: dbErr } = await sb.from('student_images').insert({ student_id:currentUser.id, path:storagePath, order_index:data.images.length+i });
+    if (dbErr) return alert('이미지 정보 저장 실패: ' + dbErr.message);
   }
   showStudent('upload');
 }
@@ -1326,6 +1344,7 @@ async function submitExam() {
     toast('제출이 완료되었습니다.');
     return showStudent('result');
   }
+  if (!currentUser?.id) return alert('로그인 정보 오류입니다. 다시 로그인해 주세요.');
   const { error } = await sb.from('submissions').insert({ student_id:currentUser.id, answers:payload, tab_log_count:data.logs.length });
   if (error) return alert(error.code==='23505' ? '이미 제출했습니다.' : '제출 실패: '+error.message);
   examActive = false;
@@ -1366,7 +1385,7 @@ async function addLog(type, msg) {
   if (TEST_MODE) {
     DEMO.logs.unshift({ id:uid('log'), studentId:currentUser.id, studentNo:currentUser.loginId, name:currentUser.name, classNo:currentUser.classNo, type, msg, time:new Date().toISOString() });
   } else {
-    await sb.from('tab_logs').insert({ student_id:currentUser.id, student_name:currentUser.name, class:currentUser.classNo, type, message:msg });
+    if (currentUser?.id) await sb.from('tab_logs').insert({ student_id:currentUser.id, student_name:currentUser.name, class:currentUser.classNo, type, message:msg });
   }
   toast('이탈 로그가 기록되었습니다.');
 }
