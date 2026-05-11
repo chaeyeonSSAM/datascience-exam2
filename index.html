@@ -22,7 +22,7 @@
 <div id="fs" class="fs" onclick="closeFs()"><img id="fsImg" src=""><button class="btn" onclick="closeFs()">닫기</button></div><div id="toast" class="toast"></div>
 
 <script>
-const SB_URL='https://gwangmun.data.supabase.co';
+const SB_URL='https://gwangmundata.supabase.co';
 const SB_KEY='sb_publishable_DW3JOZ3BMF8s0loF_5o8Pw_YOJmLcPh';
 const TEST_MODE=SB_URL.includes('YOUR_')||SB_KEY.includes('YOUR_');
 let sb=null;if(!TEST_MODE&&window.supabase)sb=supabase.createClient(SB_URL,SB_KEY);
