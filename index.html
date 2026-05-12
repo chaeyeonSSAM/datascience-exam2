@@ -767,6 +767,57 @@ tbody tr:hover td { background: #FAFBFF; }
   box-shadow: var(--shadow-s);
 }
 
+
+
+/* ── 수동 채점 / 업로드 사진 확인 ── */
+.score-edit-box {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  background: #F8FAFF;
+  border-radius: var(--r);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 130px 1fr auto auto;
+  gap: 8px;
+  align-items: end;
+}
+.score-edit-box .field { margin: 0; }
+.score-edit-box input[type="number"] { text-align: right; font-weight: 700; }
+.manual-chip { color: var(--amber); font-weight: 700; }
+.auto-chip { color: var(--text-3); font-weight: 700; }
+.photo-review-table table { min-width: 980px; }
+.photo-strip {
+  display: grid;
+  grid-template-columns: repeat(10, 72px);
+  gap: 6px;
+  align-items: center;
+}
+.photo-thumb-sm {
+  width: 72px;
+  height: 54px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-4);
+  font-size: 11px;
+  font-weight: 700;
+}
+.photo-thumb-sm img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+  display: block;
+}
+@media(max-width: 900px) {
+  .score-edit-box { grid-template-columns: 1fr; }
+  .photo-strip { grid-template-columns: repeat(5, 72px); }
+}
+
 /* ── 모달 ── */
 .overlay {
   position: fixed; inset: 0;
@@ -1003,6 +1054,7 @@ tbody tr:hover td { background: #FAFBFF; }
           <button id="nav-dashboard" class="on" onclick="showAdmin('dashboard')">📊 대시보드</button>
           <button id="nav-questions"         onclick="showAdmin('questions')">❓ 문제 관리</button>
           <button id="nav-classes"           onclick="showAdmin('classes')">🏫 반별 오픈</button>
+          <button id="nav-uploadPhotos"      onclick="showAdmin('uploadPhotos')">🖼️ 업로드 사진 확인</button>
           <div class="nav-sep"></div>
           <button id="nav-submissions"       onclick="showAdmin('submissions')">📋 제출 현황</button>
           <button id="nav-excel"             onclick="showAdmin('excel')">📥 엑셀 출력</button>
@@ -1021,6 +1073,7 @@ tbody tr:hover td { background: #FAFBFF; }
         <section id="sec-dashboard"   class="section"></section>
         <section id="sec-questions"   class="section"></section>
         <section id="sec-classes"     class="section"></section>
+        <section id="sec-uploadPhotos" class="section"></section>
         <section id="sec-submissions" class="section"></section>
         <section id="sec-excel"       class="section"></section>
         <section id="sec-logs"        class="section"></section>
@@ -1082,7 +1135,7 @@ const DEMO = {
     { id:'q2', no:2, score:15, text:'[문제 2]\n의사결정트리에서 과적합을 방지하는 대표 방법을 쓰시오.', imageUrl:'', is_active:true, accepted:['pruning','가지치기'] },
     { id:'q3', no:3, score:15, text:'[문제 3]\nRandom Forest와 단일 의사결정트리 중 앙상블 모델은 무엇인가?', imageUrl:'', is_active:true, accepted:['random forest','랜덤 포레스트'] }
   ],
-  images: {}, submissions: [], logs: []
+  images: {}, submissions: [], logs: [], manualScores: {}
 };
 
 let currentUser = null, isAdmin = false, answers = {}, examActive = false, currentAdminTab = 'dashboard';
@@ -1099,12 +1152,16 @@ function gradeOne(studentAnswer, accepted, score) {
   const ok = (accepted||[]).some(a => normalizeAnswer(a) === n);
   return { earned: ok ? Number(score||0) : 0, correct: ok, studentAnswer: studentAnswer||'', accepted: accepted||[] };
 }
-function gradeSubmission(sub, questions) {
+function gradeSubmission(sub, questions, overrides={}) {
   let total = 0;
   const detail = {};
   (questions||[]).forEach(q => {
-    const g = gradeOne(sub.answers?.[q.id]||'', q.accepted||[], q.score||0);
-    detail[q.id] = g; total += g.earned;
+    const auto = gradeOne(sub.answers?.[q.id]||'', q.accepted||[], q.score||0);
+    const ov = overrides?.[q.id];
+    const hasManual = ov && ov.score !== null && ov.score !== undefined && ov.score !== '';
+    const earned = hasManual ? Number(ov.score) : auto.earned;
+    const g = { ...auto, autoEarned:auto.earned, earned, manual:!!hasManual, note:ov?.note||'' };
+    detail[q.id] = g; total += earned;
   });
   return { total, detail };
 }
@@ -1274,10 +1331,10 @@ async function showStudent(t) {
 async function showAdmin(t) {
   if (!isAdmin) return;
   currentAdminTab = t;
-  ['nav-dashboard','nav-questions','nav-classes','nav-submissions','nav-excel','nav-logs','nav-students']
+  ['nav-dashboard','nav-questions','nav-classes','nav-uploadPhotos','nav-submissions','nav-excel','nav-logs','nav-students']
     .forEach(id => { if ($(id)) $(id).classList.remove('on'); });
   $('nav-'+t).classList.add('on');
-  showOnly(['sec-dashboard','sec-questions','sec-classes','sec-submissions','sec-excel','sec-logs','sec-students'], 'sec-'+t);
+  showOnly(['sec-dashboard','sec-questions','sec-classes','sec-uploadPhotos','sec-submissions','sec-excel','sec-logs','sec-students'], 'sec-'+t);
   renderAdmin(t);
 }
 
@@ -1590,6 +1647,35 @@ async function adminSubs() {
   const { data } = await sb.from('submissions').select('*, students(name,student_id,class)').order('submitted_at', { ascending:false });
   return data||[];
 }
+async function adminManualScores() {
+  if (TEST_MODE) {
+    return Object.values(DEMO.manualScores||{}).map(x => ({
+      submission_id:x.submission_id, question_id:x.question_id, score:x.score, note:x.note||''
+    }));
+  }
+  const { data } = await sb.from('submission_scores').select('*');
+  return data||[];
+}
+
+async function adminStudentImages() {
+  const students = (await adminStudents()).sort((a,b) => String(a.class).localeCompare(String(b.class), undefined, {numeric:true}) || String(a.student_id).localeCompare(String(b.student_id)));
+  if (TEST_MODE) {
+    return students.map(st => ({
+      ...st,
+      images:(DEMO.images[st.id]||[]).map((im,i)=>({ ...im, order_index:i, url:im.url }))
+    }));
+  }
+  const { data:imgs } = await sb.from('student_images').select('*').order('order_index');
+  const byStudent = {};
+  for (const im of imgs||[]) {
+    const { data } = await sb.storage.from('student-images').createSignedUrl(im.path, 60*30);
+    const row = { ...im, url:data?.signedUrl||'' };
+    if (!byStudent[im.student_id]) byStudent[im.student_id] = [];
+    byStudent[im.student_id].push(row);
+  }
+  return students.map(st => ({ ...st, images:(byStudent[st.id]||[]).sort((a,b)=>(a.order_index||0)-(b.order_index||0)) }));
+}
+
 async function adminLogs() {
   if (TEST_MODE) return DEMO.logs;
   const { data } = await sb.from('tab_logs').select('*, students(name,student_id,class)').order('detected_at', { ascending:false }).limit(300);
@@ -1600,6 +1686,7 @@ async function renderAdmin(t) {
   if (t==='dashboard')   renderDashboard();
   if (t==='questions')   renderQuestions();
   if (t==='classes')     renderClasses();
+  if (t==='uploadPhotos') renderUploadPhotos();
   if (t==='submissions') renderSubs();
   if (t==='excel')       renderExcelExport();
   if (t==='logs')        renderLogs();
@@ -1607,9 +1694,9 @@ async function renderAdmin(t) {
 }
 
 async function renderDashboard() {
-  const [st, subs, cls, logs, q] = await Promise.all([adminStudents(), adminSubs(), adminClasses(), adminLogs(), adminQuestions()]);
-  const graded = subs.map(s => gradeSubmission(s, q));
-  const avg = graded.length ? (graded.reduce((a,b)=>a+b.total,0)/graded.length).toFixed(1) : '0.0';
+  const [st, subs, cls, logs, gradedRows] = await Promise.all([adminStudents(), adminSubs(), adminClasses(), adminLogs(), getGradedRows()]);
+  const graded = gradedRows.filter(r => r.total !== null);
+  const avg = graded.length ? (graded.reduce((a,b)=>a+Number(b.total||0),0)/graded.length).toFixed(1) : '0.0';
   $('sec-dashboard').innerHTML = `
     <h2 class="page-title">관리자 대시보드</h2>
     <p class="page-desc">수행평가 전체 현황입니다.</p>
@@ -1771,13 +1858,66 @@ async function toggleClass(classNo, open) {
   renderClasses();
 }
 
+async function renderUploadPhotos() {
+  const rows = await adminStudentImages();
+  window.__uploadPhotoRows = rows;
+  $('sec-uploadPhotos').innerHTML = `
+    <h2 class="page-title">업로드 사진 확인</h2>
+    <p class="page-desc">반별로 학생들이 업로드한 캡처 이미지를 학번순으로 확인합니다.</p>
+    <div class="card">
+      <div class="card-body">
+        <div class="table-toolbar">
+          <div class="field">
+            <label>반 필터</label>
+            <select id="photoFilterClass" class="select" onchange="drawUploadPhotosTable()" style="width:120px">
+              <option value="">전체</option>
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="uploadPhotoTable" class="table-wrap photo-review-table"></div>
+      </div>
+    </div>`;
+  drawUploadPhotosTable();
+}
+
+function drawUploadPhotosTable() {
+  let rows = [...(window.__uploadPhotoRows||[])];
+  const cls = $('photoFilterClass')?.value || '';
+  if (cls) rows = rows.filter(r => String(r.class)===String(cls));
+  rows.sort((a,b) => String(a.class).localeCompare(String(b.class), undefined, {numeric:true}) || String(a.student_id).localeCompare(String(b.student_id)));
+  $('uploadPhotoTable').innerHTML = rows.length ? `
+    <table>
+      <thead><tr><th>반</th><th>학번</th><th>이름</th><th>업로드</th><th>캡처 이미지 1~10</th></tr></thead>
+      <tbody>${rows.map(r=>{
+        const imgs = r.images || [];
+        const cells = Array.from({length:10}, (_,i)=>{
+          const im = imgs[i];
+          return im ? `<div class="photo-thumb-sm"><img src="${im.url}" onclick="openFs('${im.url}')" title="${r.name} 캡처 ${i+1}"></div>` : `<div class="photo-thumb-sm">${i+1}</div>`;
+        }).join('');
+        return `<tr>
+          <td>${r.class}반</td>
+          <td>${r.student_id}</td>
+          <td>${r.name}</td>
+          <td><span class="badge ${imgs.length?'blue':'yellow'}">${imgs.length}/10장</span></td>
+          <td><div class="photo-strip">${cells}</div></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>` : '<div class="empty">조회 결과가 없습니다.</div>';
+}
+
 async function getGradedRows() {
-  const [students, subs, questions] = await Promise.all([adminStudents(), adminSubs(), adminQuestions()]);
+  const [students, subs, questions, scoreRows] = await Promise.all([adminStudents(), adminSubs(), adminQuestions(), adminManualScores()]);
   const subByStudent = {};
   subs.forEach(s => subByStudent[s.students?.student_id || s.studentNo] = s);
+  const overridesBySub = {};
+  (scoreRows||[]).forEach(sc => {
+    if (!overridesBySub[sc.submission_id]) overridesBySub[sc.submission_id] = {};
+    overridesBySub[sc.submission_id][sc.question_id] = { score:sc.score, note:sc.note||'' };
+  });
   return students.map(st => {
     const sub = subByStudent[st.student_id];
-    const g   = sub ? gradeSubmission(sub, questions) : { total:null, detail:{} };
+    const g   = sub ? gradeSubmission(sub, questions, overridesBySub[sub.id]||{}) : { total:null, detail:{} };
     return { classNo:st.class, student_id:st.student_id, name:st.name, submission:sub, total:g.total, detail:g.detail, submittedAt:sub?(sub.submitted_at||sub.submittedAt):null, logCount:sub?(sub.tab_log_count||sub.logCount||0):0 };
   });
 }
@@ -1831,7 +1971,7 @@ function drawSubTable() {
   });
   $('subTable').innerHTML = rows.length
     ? `<table>
-        <thead><tr><th>반</th><th>학번</th><th>이름</th><th>자동채점</th><th>제출 시각</th><th>이탈</th><th>확인</th></tr></thead>
+        <thead><tr><th>반</th><th>학번</th><th>이름</th><th>최종점수</th><th>제출 시각</th><th>이탈</th><th>확인</th></tr></thead>
         <tbody>${rows.map(r=>`
           <tr>
             <td>${r.classNo}반</td>
@@ -1850,22 +1990,38 @@ function drawSubTable() {
 async function openSubmission(id) {
   const rows = await getGradedRows();
   const r    = rows.find(x => x.submission?.id===id);
+  if (!r) return alert('제출 정보를 찾을 수 없습니다.');
   const qs   = await adminQuestions();
-  $('modalTitle').textContent = `${r.name} 제출 답안 · ${r.total}점`;
+  $('modalTitle').textContent = `${r.name} 제출 답안 · 최종 ${r.total}점`;
   $('modalBody').innerHTML = qs.map(q => {
     const g = r.detail[q.id]||{};
+    const raw = r.submission.answers?.[q.id]||'(미작성)';
     return `
       <div class="question">
         <div class="q-head">
           <div class="q-no">${q.no}</div>
           <div class="q-title">문제 ${q.no}</div>
-          <div class="q-score"><span class="score-chip">${g.earned||0} / ${q.score}점</span></div>
+          <div class="q-score"><span class="score-chip">최종 ${g.earned||0} / ${q.score}점</span></div>
         </div>
         <div class="q-body">
-          <div class="answer-read">${esc(r.submission.answers?.[q.id]||'(미작성)')}</div>
+          <div class="answer-read">${esc(raw)}</div>
           <div class="answer-key">
             <b>인정 답안:</b> ${esc((q.accepted||[]).join(' / ')||'미입력')}<br>
-            <b>판정:</b> <span style="color:${g.correct?'var(--green)':'var(--red)'};font-weight:700">${g.correct?'✔ 정답':'✘ 오답'}</span>
+            <b>자동판정:</b> <span style="color:${g.correct?'var(--green)':'var(--red)'};font-weight:700">${g.correct?'✔ 정답':'✘ 오답'}</span>
+            <span class="auto-chip">자동 ${g.autoEarned??0}점</span>
+            ${g.manual ? `<br><b>수동수정:</b> <span class="manual-chip">${g.earned}점 적용</span>${g.note ? ` · ${esc(g.note)}` : ''}` : ''}
+          </div>
+          <div class="score-edit-box">
+            <div class="field">
+              <label>수정 점수</label>
+              <input id="score-${q.id}" class="input" type="number" min="0" max="${q.score}" step="0.5" value="${g.earned??0}">
+            </div>
+            <div class="field">
+              <label>수정 사유 / 메모</label>
+              <input id="note-${q.id}" class="input" type="text" value="${esc(g.note||'')}" placeholder="예: 오타 인정, 유사 답안 인정">
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveManualScore('${r.submission.id}','${q.id}',${q.score})">점수 저장</button>
+            <button class="btn btn-sm" onclick="resetManualScore('${r.submission.id}','${q.id}')">자동채점으로 되돌리기</button>
           </div>
         </div>
       </div>`;
@@ -1873,10 +2029,44 @@ async function openSubmission(id) {
   $('modal').classList.add('on');
 }
 
+async function saveManualScore(submissionId, questionId, maxScore) {
+  const input = $(`score-${questionId}`);
+  const noteInput = $(`note-${questionId}`);
+  const val = Number(input?.value);
+  if (!Number.isFinite(val)) return alert('점수를 숫자로 입력하세요.');
+  if (val < 0 || val > Number(maxScore||0)) return alert(`점수는 0점 이상 ${maxScore}점 이하로 입력하세요.`);
+  const note = noteInput?.value?.trim() || '';
+  if (TEST_MODE) {
+    DEMO.manualScores[`${submissionId}:${questionId}`] = { submission_id:submissionId, question_id:questionId, score:val, note };
+  } else {
+    const { error } = await sb.from('submission_scores').upsert({
+      submission_id:submissionId, question_id:questionId, score:val, note, updated_at:new Date().toISOString()
+    }, { onConflict:'submission_id,question_id' });
+    if (error) return alert('점수 저장 실패: ' + error.message);
+  }
+  toast('점수가 반영되었습니다.');
+  await renderSubs();
+  await openSubmission(submissionId);
+}
+
+async function resetManualScore(submissionId, questionId) {
+  if (!confirm('이 문항의 수동 수정 점수를 삭제하고 자동채점 결과로 되돌릴까요?')) return;
+  if (TEST_MODE) {
+    delete DEMO.manualScores[`${submissionId}:${questionId}`];
+  } else {
+    const { error } = await sb.from('submission_scores').delete().eq('submission_id', submissionId).eq('question_id', questionId);
+    if (error) return alert('점수 초기화 실패: ' + error.message);
+  }
+  toast('자동채점 결과로 되돌렸습니다.');
+  await renderSubs();
+  await openSubmission(submissionId);
+}
+
+
 function renderExcelExport() {
   $('sec-excel').innerHTML = `
     <h2 class="page-title">엑셀 출력</h2>
-    <p class="page-desc">수행평가일람표 양식에 학번, 이름, 자동채점 점수를 입력해 다운로드합니다.</p>
+    <p class="page-desc">수행평가일람표 양식에 학번, 이름, 자동채점 및 수동수정이 반영된 최종 점수를 입력해 다운로드합니다.</p>
     <div class="card">
       <div class="card-head"><div class="card-title">데이터과학 수행평가일람표 생성</div></div>
       <div class="card-body">
@@ -1888,7 +2078,7 @@ function renderExcelExport() {
           <label>엑셀 양식 파일 직접 선택</label>
           <input id="excelTemplate" class="input" type="file" accept=".xlsx">
         </div>
-        <button class="btn btn-primary" onclick="downloadExcel()">📥 채점 결과 엑셀 다운로드</button>
+        <button class="btn btn-primary" onclick="downloadExcel()">📥 최종 점수 엑셀 다운로드</button>
         <div id="excelMsg" class="alert"></div>
       </div>
     </div>`;
@@ -1945,7 +2135,7 @@ async function downloadExcel() {
     const blob = new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const a    = document.createElement('a');
     a.href     = URL.createObjectURL(blob);
-    a.download = '데이터과학_수행평가일람표_자동채점.xlsx';
+    a.download = '데이터과학_수행평가일람표_최종점수.xlsx';
     a.click();
     URL.revokeObjectURL(a.href);
     msg.className = 'alert on a-ok';
