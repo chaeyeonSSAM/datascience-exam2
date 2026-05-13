@@ -769,53 +769,72 @@ tbody tr:hover td { background: #FAFBFF; }
 
 
 
-/* ── 수동 채점 / 업로드 사진 확인 ── */
-.score-edit-box {
+/* ── 관리자 채점/미리보기/업로드 사진 확인 ── */
+.manual-score-box {
   margin-top: 12px;
   border: 1px solid var(--border);
   background: #F8FAFF;
   border-radius: var(--r);
   padding: 12px;
+}
+.manual-score-grid {
   display: grid;
-  grid-template-columns: 130px 1fr auto auto;
-  gap: 8px;
+  grid-template-columns: 120px 1fr auto;
+  gap: 10px;
   align-items: end;
 }
-.score-edit-box .field { margin: 0; }
-.score-edit-box input[type="number"] { text-align: right; font-weight: 700; }
-.manual-chip { color: var(--amber); font-weight: 700; }
-.auto-chip { color: var(--text-3); font-weight: 700; }
-.photo-review-table table { min-width: 980px; }
+.manual-score-grid .field { margin: 0; }
+.preview-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.preview-student-frame {
+  border: 2px solid var(--primary-l);
+  border-radius: var(--r-l);
+  background: #fff;
+  padding: 16px;
+}
+.photo-row {
+  display: grid;
+  grid-template-columns: 72px 96px 90px minmax(650px, 1fr);
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-l);
+  padding: 10px 0;
+}
+.photo-row:last-child { border-bottom: none; }
 .photo-strip {
   display: grid;
-  grid-template-columns: repeat(10, 72px);
+  grid-template-columns: repeat(10, 82px);
   gap: 6px;
-  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
-.photo-thumb-sm {
-  width: 72px;
-  height: 54px;
+.photo-slot {
+  width: 82px;
+  height: 62px;
   border: 1px solid var(--border);
   border-radius: var(--r);
   background: var(--bg);
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-4);
   font-size: 11px;
-  font-weight: 700;
+  overflow: hidden;
 }
-.photo-thumb-sm img {
+.photo-slot img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   cursor: zoom-in;
-  display: block;
 }
 @media(max-width: 900px) {
-  .score-edit-box { grid-template-columns: 1fr; }
-  .photo-strip { grid-template-columns: repeat(5, 72px); }
+  .manual-score-grid { grid-template-columns: 1fr; }
+  .photo-row { grid-template-columns: 1fr; }
 }
 
 /* ── 모달 ── */
@@ -1054,9 +1073,10 @@ tbody tr:hover td { background: #FAFBFF; }
           <button id="nav-dashboard" class="on" onclick="showAdmin('dashboard')">📊 대시보드</button>
           <button id="nav-questions"         onclick="showAdmin('questions')">❓ 문제 관리</button>
           <button id="nav-classes"           onclick="showAdmin('classes')">🏫 반별 오픈</button>
-          <button id="nav-uploadPhotos"      onclick="showAdmin('uploadPhotos')">🖼️ 업로드 사진 확인</button>
+          <button id="nav-uploadphotos"      onclick="showAdmin('uploadphotos')">🖼️ 업로드 사진 확인</button>
           <div class="nav-sep"></div>
           <button id="nav-submissions"       onclick="showAdmin('submissions')">📋 제출 현황</button>
+          <button id="nav-preview"           onclick="showAdmin('preview')">👀 수행평가 미리보기</button>
           <button id="nav-excel"             onclick="showAdmin('excel')">📥 엑셀 출력</button>
           <button id="nav-logs"              onclick="showAdmin('logs')">🚨 이탈 로그</button>
           <div class="nav-sep"></div>
@@ -1073,8 +1093,9 @@ tbody tr:hover td { background: #FAFBFF; }
         <section id="sec-dashboard"   class="section"></section>
         <section id="sec-questions"   class="section"></section>
         <section id="sec-classes"     class="section"></section>
-        <section id="sec-uploadPhotos" class="section"></section>
+        <section id="sec-uploadphotos" class="section"></section>
         <section id="sec-submissions" class="section"></section>
+        <section id="sec-preview"     class="section"></section>
         <section id="sec-excel"       class="section"></section>
         <section id="sec-logs"        class="section"></section>
         <section id="sec-students"    class="section"></section>
@@ -1131,11 +1152,11 @@ const DEMO = {
   ],
   classSettings: CLASS_LIST.map((c,i) => ({ classNo: c, isOpen: i===0, uploadOpen: false })),
   questions: [
-    { id:'q1', no:1, score:10, text:'[문제 1]\n다음 분석 기법의 이름을 영어로 쓰시오.\n(정답 예: regression)', imageUrl:'', is_active:true, accepted:['regression','linear regression'] },
-    { id:'q2', no:2, score:15, text:'[문제 2]\n의사결정트리에서 과적합을 방지하는 대표 방법을 쓰시오.', imageUrl:'', is_active:true, accepted:['pruning','가지치기'] },
-    { id:'q3', no:3, score:15, text:'[문제 3]\nRandom Forest와 단일 의사결정트리 중 앙상블 모델은 무엇인가?', imageUrl:'', is_active:true, accepted:['random forest','랜덤 포레스트'] }
+    { id:'q1', no:1, question_type:'short', score:10, text:'[문제 1]\n다음 분석 기법의 이름을 영어로 쓰시오.\n(정답 예: regression)', imageUrl:'', is_active:true, accepted:['regression','linear regression'] },
+    { id:'q2', no:2, question_type:'short', score:15, text:'[문제 2]\n의사결정트리에서 과적합을 방지하는 대표 방법을 쓰시오.', imageUrl:'', is_active:true, accepted:['pruning','가지치기'] },
+    { id:'q3', no:3, question_type:'short', score:15, text:'[문제 3]\nRandom Forest와 단일 의사결정트리 중 앙상블 모델은 무엇인가?', imageUrl:'', is_active:true, accepted:['random forest','랜덤 포레스트'] }
   ],
-  images: {}, submissions: [], logs: [], manualScores: {}
+  images: {}, submissions: [], logs: []
 };
 
 let currentUser = null, isAdmin = false, answers = {}, examActive = false, currentAdminTab = 'dashboard';
@@ -1147,21 +1168,27 @@ function esc(s='') { return String(s).replaceAll('&','&amp;').replaceAll('<','&l
 function normalizeAnswer(s) { return String(s??'').normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase(); }
 function parseAccepted(s) { return String(s||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean); }
 
-function gradeOne(studentAnswer, accepted, score) {
+function gradeOne(studentAnswer, accepted, score, questionType='short', override=null) {
+  const maxScore = Number(score||0);
+  const type = questionType || 'short';
+  if (override && override.score !== undefined && override.score !== null) {
+    const manual = Math.max(0, Math.min(maxScore, Number(override.score)||0));
+    return { earned: manual, correct: manual >= maxScore && maxScore > 0, manual:true, note:override.note||'', studentAnswer: studentAnswer||'', accepted: accepted||[], type };
+  }
+  if (type === 'essay') {
+    return { earned: 0, correct:false, manual:false, needsManual:true, studentAnswer: studentAnswer||'', accepted: accepted||[], type };
+  }
   const n = normalizeAnswer(studentAnswer);
   const ok = (accepted||[]).some(a => normalizeAnswer(a) === n);
-  return { earned: ok ? Number(score||0) : 0, correct: ok, studentAnswer: studentAnswer||'', accepted: accepted||[] };
+  return { earned: ok ? maxScore : 0, correct: ok, manual:false, studentAnswer: studentAnswer||'', accepted: accepted||[], type };
 }
-function gradeSubmission(sub, questions, overrides={}) {
+function gradeSubmission(sub, questions, scoreMap={}) {
   let total = 0;
   const detail = {};
   (questions||[]).forEach(q => {
-    const auto = gradeOne(sub.answers?.[q.id]||'', q.accepted||[], q.score||0);
-    const ov = overrides?.[q.id];
-    const hasManual = ov && ov.score !== null && ov.score !== undefined && ov.score !== '';
-    const earned = hasManual ? Number(ov.score) : auto.earned;
-    const g = { ...auto, autoEarned:auto.earned, earned, manual:!!hasManual, note:ov?.note||'' };
-    detail[q.id] = g; total += earned;
+    const override = scoreMap[`${sub?.id||''}:${q.id}`] || scoreMap[q.id] || null;
+    const g = gradeOne(sub?.answers?.[q.id]||'', q.accepted||[], q.score||0, q.question_type||q.type||'short', override);
+    detail[q.id] = g; total += Number(g.earned||0);
   });
   return { total, detail };
 }
@@ -1331,10 +1358,10 @@ async function showStudent(t) {
 async function showAdmin(t) {
   if (!isAdmin) return;
   currentAdminTab = t;
-  ['nav-dashboard','nav-questions','nav-classes','nav-uploadPhotos','nav-submissions','nav-excel','nav-logs','nav-students']
+  ['nav-dashboard','nav-questions','nav-classes','nav-uploadphotos','nav-submissions','nav-preview','nav-excel','nav-logs','nav-students']
     .forEach(id => { if ($(id)) $(id).classList.remove('on'); });
   $('nav-'+t).classList.add('on');
-  showOnly(['sec-dashboard','sec-questions','sec-classes','sec-uploadPhotos','sec-submissions','sec-excel','sec-logs','sec-students'], 'sec-'+t);
+  showOnly(['sec-dashboard','sec-questions','sec-classes','sec-uploadphotos','sec-submissions','sec-preview','sec-excel','sec-logs','sec-students'], 'sec-'+t);
   renderAdmin(t);
 }
 
@@ -1365,7 +1392,7 @@ async function studentState() {
   let questions = [];
   if (cs?.is_open) {
     const { data:q } = await sb.from('questions').select('*').eq('is_active', true).order('order_num');
-    questions = (q||[]).map(x => ({ id:x.id, no:x.order_num, score:x.score, text:x.text, imageUrl:x.image_url }));
+    questions = (q||[]).map(x => ({ id:x.id, no:x.order_num, question_type:x.question_type||'short', score:x.score, text:x.text, imageUrl:x.image_url }));
   }
   return { open:!!cs?.is_open, uploadOpen:!!cs?.upload_open, images:signedImgs, questions, submission:sub, logs:logs||[] };
 }
@@ -1593,7 +1620,7 @@ async function renderResult(data) {
   if (!qs.length) {
     qs = TEST_MODE
       ? DEMO.questions
-      : ((await sb.from('questions').select('*').order('order_num')).data||[]).map(x => ({ id:x.id, no:x.order_num, score:x.score, text:x.text, imageUrl:x.image_url }));
+      : ((await sb.from('questions').select('*').order('order_num')).data||[]).map(x => ({ id:x.id, no:x.order_num, question_type:x.question_type||'short', score:x.score, text:x.text, imageUrl:x.image_url }));
   }
   $('sec-result').innerHTML = `
     <h2 class="page-title">제출 확인</h2>
@@ -1628,14 +1655,14 @@ async function adminStudents() {
   return data||[];
 }
 async function adminQuestions() {
-  if (TEST_MODE) return DEMO.questions;
+  if (TEST_MODE) return DEMO.questions.map(q => ({ question_type:'short', ...q }));
   const [{ data:q }, { data:a }] = await Promise.all([
     sb.from('questions').select('*').order('order_num'),
     sb.from('question_answers').select('*')
   ]);
   const amap = {};
   (a||[]).forEach(x => amap[x.question_id] = x.accepted_answers||[]);
-  return (q||[]).map(x => ({ id:x.id, no:x.order_num, score:x.score, text:x.text, imageUrl:x.image_url, is_active:x.is_active, accepted:amap[x.id]||[] }));
+  return (q||[]).map(x => ({ id:x.id, no:x.order_num, question_type:x.question_type||'short', score:x.score, text:x.text, imageUrl:x.image_url, imagePath:x.image_path, is_active:x.is_active, accepted:amap[x.id]||[] }));
 }
 async function adminClasses() {
   if (TEST_MODE) return normalizeClassRows(DEMO.classSettings);
@@ -1647,56 +1674,49 @@ async function adminSubs() {
   const { data } = await sb.from('submissions').select('*, students(name,student_id,class)').order('submitted_at', { ascending:false });
   return data||[];
 }
-async function adminManualScores() {
-  if (TEST_MODE) {
-    return Object.values(DEMO.manualScores||{}).map(x => ({
-      submission_id:x.submission_id, question_id:x.question_id, score:x.score, note:x.note||''
-    }));
-  }
-  const { data } = await sb.from('submission_scores').select('*');
-  return data||[];
-}
-
-async function adminStudentImages() {
-  const students = (await adminStudents()).sort((a,b) => String(a.class).localeCompare(String(b.class), undefined, {numeric:true}) || String(a.student_id).localeCompare(String(b.student_id)));
-  if (TEST_MODE) {
-    return students.map(st => ({
-      ...st,
-      images:(DEMO.images[st.id]||[]).map((im,i)=>({ ...im, order_index:i, url:im.url }))
-    }));
-  }
-  const { data:imgs } = await sb.from('student_images').select('*').order('order_index');
-  const byStudent = {};
-  for (const im of imgs||[]) {
-    const { data } = await sb.storage.from('student-images').createSignedUrl(im.path, 60*30);
-    const row = { ...im, url:data?.signedUrl||'' };
-    if (!byStudent[im.student_id]) byStudent[im.student_id] = [];
-    byStudent[im.student_id].push(row);
-  }
-  return students.map(st => ({ ...st, images:(byStudent[st.id]||[]).sort((a,b)=>(a.order_index||0)-(b.order_index||0)) }));
-}
-
 async function adminLogs() {
   if (TEST_MODE) return DEMO.logs;
   const { data } = await sb.from('tab_logs').select('*, students(name,student_id,class)').order('detected_at', { ascending:false }).limit(300);
   return data||[];
+}
+async function adminScores() {
+  if (TEST_MODE) return [];
+  const { data } = await sb.from('submission_scores').select('*');
+  return data||[];
+}
+async function adminStudentImages() {
+  const students = await adminStudents();
+  const byId = {};
+  students.forEach(s => byId[s.id] = { ...s, images:[] });
+  if (TEST_MODE) {
+    students.forEach(s => { byId[s.id].images = (DEMO.images[s.id]||[]).map((im,i)=>({ ...im, order_index:i })); });
+    return Object.values(byId).sort((a,b)=>String(a.class).localeCompare(String(b.class),'ko',{numeric:true})||String(a.student_id).localeCompare(String(b.student_id),'ko',{numeric:true}));
+  }
+  const { data:imgs } = await sb.from('student_images').select('*').order('order_index');
+  for (const im of imgs||[]) {
+    if (!byId[im.student_id]) continue;
+    const { data } = await sb.storage.from('student-images').createSignedUrl(im.path, 60*30);
+    byId[im.student_id].images.push({ ...im, url:data?.signedUrl||'' });
+  }
+  return Object.values(byId).sort((a,b)=>String(a.class).localeCompare(String(b.class),'ko',{numeric:true})||String(a.student_id).localeCompare(String(b.student_id),'ko',{numeric:true}));
 }
 
 async function renderAdmin(t) {
   if (t==='dashboard')   renderDashboard();
   if (t==='questions')   renderQuestions();
   if (t==='classes')     renderClasses();
-  if (t==='uploadPhotos') renderUploadPhotos();
+  if (t==='uploadphotos') renderUploadPhotos();
   if (t==='submissions') renderSubs();
+  if (t==='preview')     renderPreview();
   if (t==='excel')       renderExcelExport();
   if (t==='logs')        renderLogs();
   if (t==='students')    renderStudents();
 }
 
 async function renderDashboard() {
-  const [st, subs, cls, logs, gradedRows] = await Promise.all([adminStudents(), adminSubs(), adminClasses(), adminLogs(), getGradedRows()]);
-  const graded = gradedRows.filter(r => r.total !== null);
-  const avg = graded.length ? (graded.reduce((a,b)=>a+Number(b.total||0),0)/graded.length).toFixed(1) : '0.0';
+  const [st, subs, cls, logs, q, gradedRows] = await Promise.all([adminStudents(), adminSubs(), adminClasses(), adminLogs(), adminQuestions(), getGradedRows()]);
+  const submittedRows = gradedRows.filter(r => r.total !== null);
+  const avg = submittedRows.length ? (submittedRows.reduce((a,b)=>a+Number(b.total||0),0)/submittedRows.length).toFixed(1) : '0.0';
   $('sec-dashboard').innerHTML = `
     <h2 class="page-title">관리자 대시보드</h2>
     <p class="page-desc">수행평가 전체 현황입니다.</p>
@@ -1709,7 +1729,7 @@ async function renderDashboard() {
     <div class="card">
       <div class="card-head">
         <div class="card-title">반별 오픈 현황</div>
-        <span class="badge blue">자동채점 평균 ${avg}점</span>
+        <span class="badge blue">최종점수 평균 ${avg}점</span>
       </div>
       <div class="card-body table-wrap">
         <table>
@@ -1724,7 +1744,7 @@ async function renderQuestions() {
   const q = await adminQuestions();
   $('sec-questions').innerHTML = `
     <h2 class="page-title">문제 관리</h2>
-    <p class="page-desc">문제, 배점, 정답 및 유사 답안을 등록합니다. 한 줄에 하나씩 완전일치로 채점됩니다.</p>
+    <p class="page-desc">문제 유형을 선택하고, 주관식은 정답/유사답안을 기준으로 자동채점하며 서술형은 직접 채점합니다.</p>
     <div class="card">
       <div class="card-head"><div class="card-title">문제 추가</div></div>
       <div class="card-body">
@@ -1732,11 +1752,18 @@ async function renderQuestions() {
           <div class="field"><label>문제 번호</label><input id="qNo" class="input" type="number" min="1"></div>
           <div class="field"><label>배점</label><input id="qScore" class="input" type="number" min="1"></div>
         </div>
-        <div class="field"><label>문제 텍스트</label><textarea id="qText" class="textarea" rows="5" placeholder="문제 내용을 입력하세요."></textarea></div>
         <div class="field">
+          <label>문제 유형</label>
+          <select id="qType" class="select" onchange="toggleAcceptedHelp()">
+            <option value="short">주관식 - 정답 기준 자동채점</option>
+            <option value="essay">서술형 - 교사 직접 채점</option>
+          </select>
+        </div>
+        <div class="field"><label>문제 텍스트</label><textarea id="qText" class="textarea" rows="5" placeholder="문제 내용을 입력하세요."></textarea></div>
+        <div class="field" id="qAcceptedWrap">
           <label>정답 및 유사 답안</label>
-          <textarea id="qAccepted" class="textarea" rows="4" placeholder="regression&#10;REGRESSION&#10;linear regression"></textarea>
-          <div class="hint">한 줄에 하나씩 입력. 대소문자 무시, 앞뒤 공백 제거 후 완전일치 채점.</div>
+          <textarea id="qAccepted" class="textarea" rows="4" placeholder="regression&#10;linear regression&#10;회귀분석"></textarea>
+          <div class="hint">주관식만 사용합니다. 한 줄에 하나씩 입력. 대소문자 무시, 앞뒤 공백 제거 후 완전일치 채점.</div>
         </div>
         <div class="field"><label>문제 이미지 (선택)</label><input id="qImg" class="input" type="file" accept="image/*"></div>
         <button class="btn btn-primary" onclick="addQuestion()">문제 저장</button>
@@ -1748,32 +1775,42 @@ async function renderQuestions() {
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               <span class="badge blue">${x.no}번</span>
+              <span class="badge ${x.question_type==='essay'?'yellow':''}">${x.question_type==='essay'?'서술형':'주관식'}</span>
               <span class="badge">${x.score}점</span>
               ${x.is_active===false ? '<span class="badge yellow">비활성</span>' : ''}
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0">
+            <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
+              <button class="btn btn-sm" onclick="editQuestion('${x.id}')">수정</button>
               <button class="btn btn-sm" onclick="toggleQuestion('${x.id}',${x.is_active!==false})">${x.is_active===false?'활성화':'비활성화'}</button>
               <button class="btn btn-red btn-sm" onclick="deleteQuestion('${x.id}')">삭제</button>
             </div>
           </div>
           <p style="margin-top:10px;white-space:pre-wrap;font-size:13px;line-height:1.75">${esc(x.text)}</p>
-          <div class="answer-key"><b>인정 답안:</b> ${esc((x.accepted||[]).join(' / ')||'미입력')}</div>
+          ${x.imageUrl ? `<img src="${x.imageUrl}" style="max-width:260px;max-height:160px;object-fit:contain;border:1px solid var(--border);border-radius:var(--r);margin-top:10px">` : ''}
+          <div class="answer-key"><b>채점 방식:</b> ${x.question_type==='essay'?'교사 직접 채점':'자동채점'}<br><b>인정 답안:</b> ${x.question_type==='essay'?'서술형은 인정답안 미사용':esc((x.accepted||[]).join(' / ')||'미입력')}</div>
         </div>`).join('')}
     </div>`;
+}
+
+function toggleAcceptedHelp() {
+  const type = $('qType')?.value || 'short';
+  const wrap = $('qAcceptedWrap');
+  if (wrap) wrap.style.display = type === 'essay' ? 'none' : '';
 }
 
 async function addQuestion() {
   const no       = Number($('qNo').value);
   const score    = Number($('qScore').value);
+  const type     = $('qType')?.value || 'short';
   const text     = $('qText').value.trim();
   const file     = $('qImg').files[0];
-  const accepted = parseAccepted($('qAccepted').value);
+  const accepted = type === 'essay' ? [] : parseAccepted($('qAccepted').value);
 
   if (!no||!score||!text) return alert('문제 번호, 배점, 내용을 입력하세요.');
-  if (!accepted.length && !confirm('정답/유사답안이 비어 있습니다. 자동채점에서 0점 처리됩니다. 계속할까요?')) return;
+  if (type === 'short' && !accepted.length && !confirm('정답/유사답안이 비어 있습니다. 자동채점에서 0점 처리됩니다. 계속할까요?')) return;
 
   if (TEST_MODE) {
-    DEMO.questions.push({ id:uid('q'), no, score, text, imageUrl:file?URL.createObjectURL(file):'', is_active:true, accepted });
+    DEMO.questions.push({ id:uid('q'), no, question_type:type, score, text, imageUrl:file?URL.createObjectURL(file):'', is_active:true, accepted });
     DEMO.questions.sort((a,b)=>a.no-b.no);
     return renderQuestions();
   }
@@ -1786,10 +1823,78 @@ async function addQuestion() {
     const { data:u } = sb.storage.from('question-images').getPublicUrl(image_path);
     image_url = u.publicUrl;
   }
-  const { data:q, error } = await sb.from('questions').insert({ order_num:no, score, text, image_url, image_path, is_active:true }).select('id').single();
+  const { data:q, error } = await sb.from('questions').insert({ order_num:no, score, question_type:type, text, image_url, image_path, is_active:true }).select('id').single();
   if (error) return alert('저장 실패: ' + error.message);
   const { error:aErr } = await sb.from('question_answers').insert({ question_id:q.id, accepted_answers:accepted });
   if (aErr) return alert('정답 저장 실패: ' + aErr.message);
+  renderQuestions();
+}
+
+async function editQuestion(id) {
+  const qs = await adminQuestions();
+  const q = qs.find(x => x.id === id);
+  if (!q) return alert('문제를 찾을 수 없습니다.');
+  $('modalTitle').textContent = `문제 ${q.no} 수정`;
+  $('modalBody').innerHTML = `
+    <div class="form-grid">
+      <div class="field"><label>문제 번호</label><input id="editQNo" class="input" type="number" min="1" value="${q.no}"></div>
+      <div class="field"><label>배점</label><input id="editQScore" class="input" type="number" min="0" step="0.5" value="${q.score}"></div>
+    </div>
+    <div class="field">
+      <label>문제 유형</label>
+      <select id="editQType" class="select" onchange="document.getElementById('editAcceptedWrap').style.display=this.value==='essay'?'none':''">
+        <option value="short" ${q.question_type!=='essay'?'selected':''}>주관식 - 정답 기준 자동채점</option>
+        <option value="essay" ${q.question_type==='essay'?'selected':''}>서술형 - 교사 직접 채점</option>
+      </select>
+    </div>
+    <div class="field"><label>문제 텍스트</label><textarea id="editQText" class="textarea" rows="6">${esc(q.text)}</textarea></div>
+    <div class="field" id="editAcceptedWrap" style="${q.question_type==='essay'?'display:none':''}">
+      <label>정답 및 유사 답안</label>
+      <textarea id="editQAccepted" class="textarea" rows="5">${esc((q.accepted||[]).join('\n'))}</textarea>
+      <div class="hint">채점 과정에서 추가 인정할 답안을 한 줄에 하나씩 추가하세요.</div>
+    </div>
+    <div class="field"><label>문제 이미지 교체 (선택)</label><input id="editQImg" class="input" type="file" accept="image/*"></div>
+    ${q.imageUrl ? `<div class="field"><label>현재 이미지</label><img src="${q.imageUrl}" style="max-width:100%;max-height:260px;object-fit:contain;border:1px solid var(--border);border-radius:var(--r)"></div>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveQuestionEdit('${q.id}')">수정 저장</button>
+      <button class="btn" onclick="closeModal()">취소</button>
+    </div>`;
+  $('modal').classList.add('on');
+}
+
+async function saveQuestionEdit(id) {
+  const no = Number($('editQNo').value);
+  const score = Number($('editQScore').value);
+  const type = $('editQType').value || 'short';
+  const text = $('editQText').value.trim();
+  const accepted = type === 'essay' ? [] : parseAccepted($('editQAccepted').value);
+  const file = $('editQImg')?.files?.[0];
+  if (!no || !text) return alert('문제 번호와 문제 내용을 입력하세요.');
+  if (score < 0) return alert('배점은 0점 이상이어야 합니다.');
+  if (type === 'short' && !accepted.length && !confirm('정답/유사답안이 비어 있습니다. 계속할까요?')) return;
+  if (TEST_MODE) {
+    const q = DEMO.questions.find(x=>x.id===id);
+    if (q) Object.assign(q, { no, score, question_type:type, text, accepted, imageUrl:file?URL.createObjectURL(file):q.imageUrl });
+    DEMO.questions.sort((a,b)=>a.no-b.no);
+    closeModal();
+    renderQuestions();
+    return;
+  }
+  const update = { order_num:no, score, question_type:type, text };
+  if (file) {
+    const ext = file.name.split('.').pop();
+    const image_path = `questions/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error:upErr } = await sb.storage.from('question-images').upload(image_path, file, { upsert:false });
+    if (upErr) return alert('이미지 업로드 실패: ' + upErr.message);
+    const { data:u } = sb.storage.from('question-images').getPublicUrl(image_path);
+    update.image_path = image_path;
+    update.image_url = u.publicUrl;
+  }
+  const { error:qErr } = await sb.from('questions').update(update).eq('id', id);
+  if (qErr) return alert('문제 수정 실패: ' + qErr.message);
+  const { error:aErr } = await sb.from('question_answers').upsert({ question_id:id, accepted_answers:accepted }, { onConflict:'question_id' });
+  if (aErr) return alert('정답 수정 실패: ' + aErr.message);
+  closeModal();
   renderQuestions();
 }
 
@@ -1858,66 +1963,20 @@ async function toggleClass(classNo, open) {
   renderClasses();
 }
 
-async function renderUploadPhotos() {
-  const rows = await adminStudentImages();
-  window.__uploadPhotoRows = rows;
-  $('sec-uploadPhotos').innerHTML = `
-    <h2 class="page-title">업로드 사진 확인</h2>
-    <p class="page-desc">반별로 학생들이 업로드한 캡처 이미지를 학번순으로 확인합니다.</p>
-    <div class="card">
-      <div class="card-body">
-        <div class="table-toolbar">
-          <div class="field">
-            <label>반 필터</label>
-            <select id="photoFilterClass" class="select" onchange="drawUploadPhotosTable()" style="width:120px">
-              <option value="">전체</option>
-              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div id="uploadPhotoTable" class="table-wrap photo-review-table"></div>
-      </div>
-    </div>`;
-  drawUploadPhotosTable();
-}
-
-function drawUploadPhotosTable() {
-  let rows = [...(window.__uploadPhotoRows||[])];
-  const cls = $('photoFilterClass')?.value || '';
-  if (cls) rows = rows.filter(r => String(r.class)===String(cls));
-  rows.sort((a,b) => String(a.class).localeCompare(String(b.class), undefined, {numeric:true}) || String(a.student_id).localeCompare(String(b.student_id)));
-  $('uploadPhotoTable').innerHTML = rows.length ? `
-    <table>
-      <thead><tr><th>반</th><th>학번</th><th>이름</th><th>업로드</th><th>캡처 이미지 1~10</th></tr></thead>
-      <tbody>${rows.map(r=>{
-        const imgs = r.images || [];
-        const cells = Array.from({length:10}, (_,i)=>{
-          const im = imgs[i];
-          return im ? `<div class="photo-thumb-sm"><img src="${im.url}" onclick="openFs('${im.url}')" title="${r.name} 캡처 ${i+1}"></div>` : `<div class="photo-thumb-sm">${i+1}</div>`;
-        }).join('');
-        return `<tr>
-          <td>${r.class}반</td>
-          <td>${r.student_id}</td>
-          <td>${r.name}</td>
-          <td><span class="badge ${imgs.length?'blue':'yellow'}">${imgs.length}/10장</span></td>
-          <td><div class="photo-strip">${cells}</div></td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table>` : '<div class="empty">조회 결과가 없습니다.</div>';
-}
-
 async function getGradedRows() {
-  const [students, subs, questions, scoreRows] = await Promise.all([adminStudents(), adminSubs(), adminQuestions(), adminManualScores()]);
+  const [students, subs, questions, scores] = await Promise.all([adminStudents(), adminSubs(), adminQuestions(), adminScores()]);
+  const scoreMapBySub = {};
+  (scores||[]).forEach(sc => {
+    const sid = sc.submission_id || sc.submissionId;
+    if (!scoreMapBySub[sid]) scoreMapBySub[sid] = {};
+    scoreMapBySub[sid][sc.question_id || sc.questionId] = { score:sc.score, note:sc.note||'' };
+  });
   const subByStudent = {};
   subs.forEach(s => subByStudent[s.students?.student_id || s.studentNo] = s);
-  const overridesBySub = {};
-  (scoreRows||[]).forEach(sc => {
-    if (!overridesBySub[sc.submission_id]) overridesBySub[sc.submission_id] = {};
-    overridesBySub[sc.submission_id][sc.question_id] = { score:sc.score, note:sc.note||'' };
-  });
   return students.map(st => {
     const sub = subByStudent[st.student_id];
-    const g   = sub ? gradeSubmission(sub, questions, overridesBySub[sub.id]||{}) : { total:null, detail:{} };
+    const scoreMap = sub ? (scoreMapBySub[sub.id]||{}) : {};
+    const g = sub ? gradeSubmission(sub, questions, scoreMap) : { total:null, detail:{} };
     return { classNo:st.class, student_id:st.student_id, name:st.name, submission:sub, total:g.total, detail:g.detail, submittedAt:sub?(sub.submitted_at||sub.submittedAt):null, logCount:sub?(sub.tab_log_count||sub.logCount||0):0 };
   });
 }
@@ -1926,7 +1985,7 @@ async function renderSubs() {
   const rows = await getGradedRows();
   $('sec-submissions').innerHTML = `
     <h2 class="page-title">제출 현황</h2>
-    <p class="page-desc">반별 확인, 정렬, 자동채점 점수를 확인합니다.</p>
+    <p class="page-desc">반별 확인, 정렬, 자동채점 결과와 수동 수정 점수를 확인합니다.</p>
     <div class="card">
       <div class="card-body">
         <div class="table-toolbar">
@@ -1989,84 +2048,74 @@ function drawSubTable() {
 
 async function openSubmission(id) {
   const rows = await getGradedRows();
-  const r    = rows.find(x => x.submission?.id===id);
+  const r = rows.find(x => x.submission?.id===id);
+  const qs = await adminQuestions();
   if (!r) return alert('제출 정보를 찾을 수 없습니다.');
-  const qs   = await adminQuestions();
   $('modalTitle').textContent = `${r.name} 제출 답안 · 최종 ${r.total}점`;
-  $('modalBody').innerHTML = qs.map(q => {
-    const g = r.detail[q.id]||{};
-    const raw = r.submission.answers?.[q.id]||'(미작성)';
-    return `
-      <div class="question">
+  $('modalBody').innerHTML = `
+    <div class="notice info">주관식은 자동채점 결과가 기본으로 들어가며, 오타·유사답안 인정 또는 서술형 채점을 위해 문항별 점수를 직접 수정할 수 있습니다. 저장하면 제출현황과 엑셀 출력에 바로 반영됩니다.</div>
+    <div id="manualTotalBox" class="notice warn">현재 합계: <b>${r.total}점</b></div>
+    ${qs.map(q => {
+      const g = r.detail[q.id]||{};
+      const ans = r.submission.answers?.[q.id]||'';
+      return `
+      <div class="question" data-qid="${q.id}" data-max="${q.score}">
         <div class="q-head">
           <div class="q-no">${q.no}</div>
-          <div class="q-title">문제 ${q.no}</div>
-          <div class="q-score"><span class="score-chip">최종 ${g.earned||0} / ${q.score}점</span></div>
+          <div class="q-title">문제 ${q.no} · ${q.question_type==='essay'?'서술형':'주관식'}</div>
+          <div class="q-score"><span class="score-chip" id="score-chip-${q.id}">${g.earned||0} / ${q.score}점</span></div>
         </div>
         <div class="q-body">
-          <div class="answer-read">${esc(raw)}</div>
+          <div class="answer-read">${esc(ans||'(미작성)')}</div>
           <div class="answer-key">
-            <b>인정 답안:</b> ${esc((q.accepted||[]).join(' / ')||'미입력')}<br>
-            <b>자동판정:</b> <span style="color:${g.correct?'var(--green)':'var(--red)'};font-weight:700">${g.correct?'✔ 정답':'✘ 오답'}</span>
-            <span class="auto-chip">자동 ${g.autoEarned??0}점</span>
-            ${g.manual ? `<br><b>수동수정:</b> <span class="manual-chip">${g.earned}점 적용</span>${g.note ? ` · ${esc(g.note)}` : ''}` : ''}
+            <b>인정 답안:</b> ${q.question_type==='essay'?'서술형은 직접 채점':esc((q.accepted||[]).join(' / ')||'미입력')}<br>
+            <b>기본 판정:</b> <span style="color:${g.correct?'var(--green)':'var(--red)'};font-weight:700">${q.question_type==='essay'?'직접 채점 필요':(g.correct?'✔ 정답':'✘ 오답')}</span>
+            ${g.manual ? '<br><b>수동 수정:</b> 적용됨' : ''}
           </div>
-          <div class="score-edit-box">
-            <div class="field">
-              <label>수정 점수</label>
-              <input id="score-${q.id}" class="input" type="number" min="0" max="${q.score}" step="0.5" value="${g.earned??0}">
+          <div class="manual-score-box">
+            <div class="manual-score-grid">
+              <div class="field"><label>점수 수정</label><input class="input manual-score-input" id="manual-${q.id}" type="number" min="0" max="${q.score}" step="0.5" value="${g.earned||0}" oninput="updateManualTotalPreview()"></div>
+              <div class="field"><label>수정 사유/메모</label><input class="input" id="manual-note-${q.id}" value="${esc(g.note||'')}" placeholder="예: 오타 인정, 서술형 부분점수"></div>
+              <button class="btn btn-primary" onclick="saveManualScore('${r.submission.id}','${q.id}',${q.score})">저장</button>
             </div>
-            <div class="field">
-              <label>수정 사유 / 메모</label>
-              <input id="note-${q.id}" class="input" type="text" value="${esc(g.note||'')}" placeholder="예: 오타 인정, 유사 답안 인정">
-            </div>
-            <button class="btn btn-primary btn-sm" onclick="saveManualScore('${r.submission.id}','${q.id}',${q.score})">점수 저장</button>
-            <button class="btn btn-sm" onclick="resetManualScore('${r.submission.id}','${q.id}')">자동채점으로 되돌리기</button>
           </div>
         </div>
       </div>`;
-  }).join('');
+    }).join('')}`;
   $('modal').classList.add('on');
+  updateManualTotalPreview();
+}
+
+function updateManualTotalPreview() {
+  const inputs = Array.from(document.querySelectorAll('.manual-score-input'));
+  const total = inputs.reduce((sum, inp) => sum + (Number(inp.value)||0), 0);
+  const box = $('manualTotalBox');
+  if (box) box.innerHTML = `현재 합계: <b>${total}점</b>`;
 }
 
 async function saveManualScore(submissionId, questionId, maxScore) {
-  const input = $(`score-${questionId}`);
-  const noteInput = $(`note-${questionId}`);
-  const val = Number(input?.value);
-  if (!Number.isFinite(val)) return alert('점수를 숫자로 입력하세요.');
-  if (val < 0 || val > Number(maxScore||0)) return alert(`점수는 0점 이상 ${maxScore}점 이하로 입력하세요.`);
-  const note = noteInput?.value?.trim() || '';
+  const input = $(`manual-${questionId}`);
+  const note = $(`manual-note-${questionId}`)?.value || '';
+  let score = Number(input?.value);
+  if (Number.isNaN(score)) return alert('점수를 숫자로 입력하세요.');
+  if (score < 0 || score > Number(maxScore||0)) return alert(`점수는 0점 이상 ${maxScore}점 이하로 입력하세요.`);
   if (TEST_MODE) {
-    DEMO.manualScores[`${submissionId}:${questionId}`] = { submission_id:submissionId, question_id:questionId, score:val, note };
-  } else {
-    const { error } = await sb.from('submission_scores').upsert({
-      submission_id:submissionId, question_id:questionId, score:val, note, updated_at:new Date().toISOString()
-    }, { onConflict:'submission_id,question_id' });
-    if (error) return alert('점수 저장 실패: ' + error.message);
+    toast('TEST MODE: 점수 저장은 실제 DB에서 적용됩니다.');
+    return;
   }
-  toast('점수가 반영되었습니다.');
-  await renderSubs();
+  const { error } = await sb.from('submission_scores').upsert({ submission_id:submissionId, question_id:questionId, score, note, updated_at:new Date().toISOString() }, { onConflict:'submission_id,question_id' });
+  if (error) return alert('점수 저장 실패: ' + error.message);
+  toast('점수가 저장되었습니다.');
+  const rows = await getGradedRows();
+  window.__subRows = rows;
+  if ($('subTable')) drawSubTable();
   await openSubmission(submissionId);
 }
-
-async function resetManualScore(submissionId, questionId) {
-  if (!confirm('이 문항의 수동 수정 점수를 삭제하고 자동채점 결과로 되돌릴까요?')) return;
-  if (TEST_MODE) {
-    delete DEMO.manualScores[`${submissionId}:${questionId}`];
-  } else {
-    const { error } = await sb.from('submission_scores').delete().eq('submission_id', submissionId).eq('question_id', questionId);
-    if (error) return alert('점수 초기화 실패: ' + error.message);
-  }
-  toast('자동채점 결과로 되돌렸습니다.');
-  await renderSubs();
-  await openSubmission(submissionId);
-}
-
 
 function renderExcelExport() {
   $('sec-excel').innerHTML = `
     <h2 class="page-title">엑셀 출력</h2>
-    <p class="page-desc">수행평가일람표 양식에 학번, 이름, 자동채점 및 수동수정이 반영된 최종 점수를 입력해 다운로드합니다.</p>
+    <p class="page-desc">수행평가일람표 양식에 학번, 이름, 최종 점수를 입력해 전체 또는 반별로 다운로드합니다.</p>
     <div class="card">
       <div class="card-head"><div class="card-title">데이터과학 수행평가일람표 생성</div></div>
       <div class="card-body">
@@ -2074,11 +2123,20 @@ function renderExcelExport() {
           저장소에 <b>template.xlsx</b>가 있으면 자동으로 불러옵니다.
           없으면 아래에서 직접 선택하세요.
         </div>
-        <div class="field">
-          <label>엑셀 양식 파일 직접 선택</label>
-          <input id="excelTemplate" class="input" type="file" accept=".xlsx">
+        <div class="form-grid">
+          <div class="field">
+            <label>반 선택</label>
+            <select id="excelClass" class="select">
+              <option value="">전체 반</option>
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>엑셀 양식 파일 직접 선택</label>
+            <input id="excelTemplate" class="input" type="file" accept=".xlsx">
+          </div>
         </div>
-        <button class="btn btn-primary" onclick="downloadExcel()">📥 최종 점수 엑셀 다운로드</button>
+        <button class="btn btn-primary" onclick="downloadExcel()">📥 선택한 범위 엑셀 다운로드</button>
         <div id="excelMsg" class="alert"></div>
       </div>
     </div>`;
@@ -2089,7 +2147,8 @@ async function downloadExcel() {
   msg.className = 'alert on a-info';
   msg.textContent = '엑셀 파일을 생성하는 중입니다...';
   try {
-    const rows = (await getGradedRows()).sort((a,b) => a.student_id.localeCompare(b.student_id));
+    const selectedClass = $('excelClass')?.value || '';
+    let rows = (await getGradedRows()).filter(r => !selectedClass || String(r.classNo)===String(selectedClass)).sort((a,b) => a.student_id.localeCompare(b.student_id));
     let buf;
     const f = $('excelTemplate')?.files?.[0];
     if (f) {
@@ -2135,7 +2194,7 @@ async function downloadExcel() {
     const blob = new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const a    = document.createElement('a');
     a.href     = URL.createObjectURL(blob);
-    a.download = '데이터과학_수행평가일람표_최종점수.xlsx';
+    a.download = `데이터과학_수행평가일람표_${selectedClass ? selectedClass+'반_' : '전체_'}최종점수.xlsx`;
     a.click();
     URL.revokeObjectURL(a.href);
     msg.className = 'alert on a-ok';
@@ -2163,6 +2222,76 @@ function copyRowStyle(ws, from, to) {
     d.getCell(col).fill     = cell.fill;
     d.getCell(col).font     = cell.font;
   });
+}
+
+async function renderPreview() {
+  const qs = (await adminQuestions()).filter(q => q.is_active !== false).sort((a,b)=>a.no-b.no);
+  $('sec-preview').innerHTML = `
+    <h2 class="page-title">수행평가 미리보기</h2>
+    <p class="page-desc">학생에게 보일 문제 화면을 관리자 화면에서 확인하고 바로 수정할 수 있습니다.</p>
+    <div class="preview-toolbar">
+      <span class="badge blue">활성 문제 ${qs.length}개</span>
+      <button class="btn" onclick="showAdmin('questions')">문제 관리로 이동</button>
+    </div>
+    <div class="preview-student-frame">
+      <div class="notice warn">학생 화면 미리보기입니다. 실제 제출 기능은 비활성화되어 있습니다.</div>
+      ${qs.length ? qs.map(q=>`
+        <div class="question">
+          <div class="q-head">
+            <div class="q-no">${q.no}</div>
+            <div class="q-title">문제 ${q.no}</div>
+            <div class="q-score">${q.score}점 · ${q.question_type==='essay'?'서술형':'주관식'}</div>
+          </div>
+          <div class="q-body">
+            <div class="q-text">${esc(q.text)}</div>
+            ${q.imageUrl ? `<img class="q-img" src="${q.imageUrl}">` : ''}
+            <textarea class="answer" disabled placeholder="학생 답안 작성 칸"></textarea>
+            <div style="margin-top:10px"><button class="btn btn-sm" onclick="editQuestion('${q.id}')">이 문제 수정</button></div>
+          </div>
+        </div>`).join('') : '<div class="empty">활성화된 문제가 없습니다.</div>'}
+    </div>`;
+}
+
+async function renderUploadPhotos() {
+  const rows = await adminStudentImages();
+  $('sec-uploadphotos').innerHTML = `
+    <h2 class="page-title">업로드 사진 확인</h2>
+    <p class="page-desc">반별로 학생들이 업로드한 캡처 사진을 학번순으로 확인합니다.</p>
+    <div class="card">
+      <div class="card-body">
+        <div class="table-toolbar">
+          <div class="field">
+            <label>반 필터</label>
+            <select id="photoFilterClass" class="select" onchange="drawUploadPhotoRows()" style="width:120px">
+              <option value="">전체</option>
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="uploadPhotoList"></div>
+      </div>
+    </div>`;
+  window.__uploadPhotoRows = rows;
+  drawUploadPhotoRows();
+}
+
+function drawUploadPhotoRows() {
+  let rows = [...(window.__uploadPhotoRows||[])];
+  const cls = $('photoFilterClass')?.value || '';
+  if (cls) rows = rows.filter(r => String(r.class)===String(cls));
+  rows.sort((a,b)=>String(a.class).localeCompare(String(b.class),'ko',{numeric:true})||String(a.student_id).localeCompare(String(b.student_id),'ko',{numeric:true}));
+  $('uploadPhotoList').innerHTML = rows.length ? rows.map(r=>`
+    <div class="photo-row">
+      <div><b>${r.class}반</b></div>
+      <div>${r.student_id}</div>
+      <div>${r.name}</div>
+      <div class="photo-strip">
+        ${Array.from({length:10}, (_,i)=>{
+          const im = (r.images||[])[i];
+          return im ? `<div class="photo-slot"><img src="${im.url}" onclick="openFs('${im.url}')" title="${r.name} 캡처 ${i+1}"></div>` : `<div class="photo-slot">${i+1}</div>`;
+        }).join('')}
+      </div>
+    </div>`).join('') : '<div class="empty">조회 결과가 없습니다.</div>';
 }
 
 async function renderLogs() {
