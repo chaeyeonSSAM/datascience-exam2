@@ -1135,6 +1135,8 @@ let sb = null;
 if (!TEST_MODE && window.supabase) sb = supabase.createClient(SB_URL, SB_KEY);
 
 const ADMIN_ID = 'admin', ADMIN_PW = 'gm11154';
+const BASE_SCORE = 16;
+const MAX_TOTAL_SCORE = 40;
 const CLASS_COUNT = 13;
 const CLASS_LIST = Array.from({length:CLASS_COUNT}, (_,i) => String(i+1));
 function classNum(v) { return Number(String(v).replace(/[^0-9]/g, '')) || 0; }
@@ -1165,7 +1167,7 @@ let examRefImages = [], examRefIdx = 0;
 const $ = id => document.getElementById(id);
 function uid(p='id') { return p + '-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function esc(s='') { return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
-function normalizeAnswer(s) { return String(s??'').normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase(); }
+function normalizeAnswer(s) { return String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,''); }
 function parseAccepted(s) { return String(s||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean); }
 
 function gradeOne(studentAnswer, accepted, score, questionType='short', override=null) {
@@ -1183,14 +1185,15 @@ function gradeOne(studentAnswer, accepted, score, questionType='short', override
   return { earned: ok ? maxScore : 0, correct: ok, manual:false, studentAnswer: studentAnswer||'', accepted: accepted||[], type };
 }
 function gradeSubmission(sub, questions, scoreMap={}) {
-  let total = 0;
+  let earnedTotal = 0;
   const detail = {};
   (questions||[]).forEach(q => {
     const override = scoreMap[`${sub?.id||''}:${q.id}`] || scoreMap[q.id] || null;
     const g = gradeOne(sub?.answers?.[q.id]||'', q.accepted||[], q.score||0, q.question_type||q.type||'short', override);
-    detail[q.id] = g; total += Number(g.earned||0);
+    detail[q.id] = g; earnedTotal += Number(g.earned||0);
   });
-  return { total, detail };
+  const total = Math.min(MAX_TOTAL_SCORE, BASE_SCORE + earnedTotal);
+  return { total, detail, baseScore:BASE_SCORE, earnedTotal };
 }
 
 function alertAuth(msg, type='err') {
@@ -2324,17 +2327,26 @@ async function renderStudents() {
   const st = await adminStudents();
   $('sec-students').innerHTML = `
     <h2 class="page-title">학생 관리</h2>
-    <p class="page-desc">가입한 학생 목록입니다.</p>
+    <p class="page-desc">학생 이름/반은 교사가 바로 수정할 수 있습니다. 단순 이름 오타는 삭제하지 말고 수정 기능을 사용하세요.</p>
+    <div class="notice warn">⚠ 삭제 시 학생 정보와 로그인 계정이 함께 삭제됩니다. 같은 학번으로 재가입해야 하는 경우에만 삭제하세요.</div>
     <div class="card">
       <div class="card-body table-wrap">
         <table>
-          <thead><tr><th>반</th><th>학번</th><th>이름</th><th>관리</th></tr></thead>
+          <thead><tr><th>반</th><th>학번</th><th>이름</th><th>수정</th><th>삭제</th></tr></thead>
           <tbody>${st.map(s=>`
             <tr>
-              <td>${s.class}반</td>
+              <td>
+                <select id="stu-class-${s.id}" class="select" style="width:90px">
+                  ${CLASS_LIST.map(c=>`<option value="${c}" ${String(s.class)===String(c)?'selected':''}>${c}반</option>`).join('')}
+                </select>
+              </td>
               <td>${s.student_id}</td>
-              <td>${s.name}</td>
-              <td><button class="btn btn-red btn-sm" onclick="deleteStudent('${s.id}')">삭제</button></td>
+              <td><input id="stu-name-${s.id}" class="input" value="${esc(s.name)}" style="min-width:120px"></td>
+              <td><button class="btn btn-sm" onclick="updateStudent('${s.id}')">수정 저장</button></td>
+              <td>
+                <button class="btn btn-red btn-sm" onclick="deleteStudent('${s.id}')">삭제</button>
+                <div class="hint" style="margin-top:4px;white-space:nowrap">삭제 시 로그인 계정도 함께 삭제됨</div>
+              </td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -2342,10 +2354,33 @@ async function renderStudents() {
     </div>`;
 }
 
+async function updateStudent(id) {
+  const name = $(`stu-name-${id}`)?.value.trim();
+  const classNo = $(`stu-class-${id}`)?.value;
+  if (!name) return alert('이름을 입력하세요.');
+  if (!classNo) return alert('반을 선택하세요.');
+  if (TEST_MODE) {
+    const u = DEMO.users.find(x=>x.id===id);
+    if (u) { u.name = name; u.classNo = classNo; }
+    toast('학생 정보가 수정되었습니다.');
+    return renderStudents();
+  }
+  const { error } = await sb.from('students').update({ name, class: classNo }).eq('id', id);
+  if (error) return alert('학생 정보 수정 실패: ' + error.message);
+  toast('학생 정보가 수정되었습니다.');
+  renderStudents();
+}
+
 async function deleteStudent(id) {
-  if (!confirm('학생을 삭제하시겠습니까?')) return;
-  if (TEST_MODE) { DEMO.users = DEMO.users.filter(u=>u.id!==id); }
-  else await sb.from('students').delete().eq('id', id);
+  if (!confirm('정말 삭제할까요?\n\n삭제 시 students 데이터뿐 아니라 Supabase Auth 로그인 계정도 함께 삭제됩니다.\n단순 이름 오타나 반 오류는 취소 후 수정 저장을 사용하세요.')) return;
+  if (TEST_MODE) {
+    DEMO.users = DEMO.users.filter(u=>u.id!==id);
+    toast('학생 계정이 삭제되었습니다.');
+  } else {
+    const { data, error } = await sb.rpc('admin_delete_student', { p_student_id:id });
+    if (error) return alert('학생 삭제 실패: ' + error.message + '\nSQL migration이 적용되었는지 확인하세요.');
+    toast(data || '학생 계정이 삭제되었습니다.');
+  }
   renderStudents();
 }
 
