@@ -1135,10 +1135,11 @@ let sb = null;
 if (!TEST_MODE && window.supabase) sb = supabase.createClient(SB_URL, SB_KEY);
 
 const ADMIN_ID = 'admin', ADMIN_PW = 'gm11154';
-const BASE_SCORE = 16;
-const MAX_TOTAL_SCORE = 40;
 const CLASS_COUNT = 13;
 const CLASS_LIST = Array.from({length:CLASS_COUNT}, (_,i) => String(i+1));
+const BASE_SCORE = 16;
+const MAX_TOTAL_SCORE = 40;
+let lastViolationAt = {};
 function classNum(v) { return Number(String(v).replace(/[^0-9]/g, '')) || 0; }
 function sortByClassNo(a,b) { return classNum(a.classNo ?? a.class ?? a) - classNum(b.classNo ?? b.class ?? b); }
 function normalizeClassRows(rows=[]) {
@@ -1167,7 +1168,7 @@ let examRefImages = [], examRefIdx = 0;
 const $ = id => document.getElementById(id);
 function uid(p='id') { return p + '-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function esc(s='') { return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
-function normalizeAnswer(s) { return String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,''); }
+function normalizeAnswer(s) { return String(s??'').normalize('NFKC').trim().replace(/\s+/g,'').toLowerCase(); }
 function parseAccepted(s) { return String(s||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean); }
 
 function gradeOne(studentAnswer, accepted, score, questionType='short', override=null) {
@@ -1185,15 +1186,16 @@ function gradeOne(studentAnswer, accepted, score, questionType='short', override
   return { earned: ok ? maxScore : 0, correct: ok, manual:false, studentAnswer: studentAnswer||'', accepted: accepted||[], type };
 }
 function gradeSubmission(sub, questions, scoreMap={}) {
-  let earnedTotal = 0;
+  // 제출자는 기본점수 16점에서 시작하고, 문항 점수를 더하되 최종 40점을 넘지 않게 계산합니다.
+  let questionTotal = 0;
   const detail = {};
   (questions||[]).forEach(q => {
     const override = scoreMap[`${sub?.id||''}:${q.id}`] || scoreMap[q.id] || null;
     const g = gradeOne(sub?.answers?.[q.id]||'', q.accepted||[], q.score||0, q.question_type||q.type||'short', override);
-    detail[q.id] = g; earnedTotal += Number(g.earned||0);
+    detail[q.id] = g; questionTotal += Number(g.earned||0);
   });
-  const total = Math.min(MAX_TOTAL_SCORE, BASE_SCORE + earnedTotal);
-  return { total, detail, baseScore:BASE_SCORE, earnedTotal };
+  const total = Math.min(MAX_TOTAL_SCORE, BASE_SCORE + questionTotal);
+  return { total, questionTotal, detail };
 }
 
 function alertAuth(msg, type='err') {
@@ -1210,16 +1212,7 @@ function toast(msg) {
 
 window.addEventListener('DOMContentLoaded', async () => {
   $('testChip').style.display = TEST_MODE ? 'inline-flex' : 'none';
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && currentUser && !isAdmin && examActive)
-      addLog('visibility_hidden', '탭 전환 또는 브라우저 최소화 감지');
-  });
-  document.addEventListener('paste', e => {
-    if (currentUser && !isAdmin && examActive) {
-      e.preventDefault();
-      addLog('paste_blocked', '붙여넣기 시도');
-    }
-  });
+  setupViolationMonitor();
   // Enter 키 로그인
   ['loginId','loginPw'].forEach(id => {
     $(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
@@ -1642,11 +1635,67 @@ async function renderResult(data) {
       </div>`).join('')}`;
 }
 
-async function addLog(type, msg) {
+
+function shouldTrackViolation() {
+  return !!(currentUser && !isAdmin && examActive);
+}
+function logViolation(type, msg, detail={}) {
+  if (!shouldTrackViolation()) return;
+  const now = Date.now();
+  const key = type + ':' + msg;
+  if (lastViolationAt[key] && now - lastViolationAt[key] < 1200) return;
+  lastViolationAt[key] = now;
+  addLog(type, msg, detail);
+}
+function setupViolationMonitor() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) logViolation('visibility_hidden', '다른 탭·앱·웹사이트 접근 의심 감지', { visibilityState:document.visibilityState });
+    else logViolation('visibility_return', '평가 화면으로 복귀', { visibilityState:document.visibilityState });
+  });
+  window.addEventListener('blur', () => logViolation('window_blur_alt_tab_suspected', 'Alt+Tab 또는 다른 창/앱 전환 의심 감지'));
+  window.addEventListener('focus', () => logViolation('window_focus_return', '평가 창으로 다시 돌아옴'));
+  window.addEventListener('pagehide', () => logViolation('pagehide_navigation', '새로고침·닫기·다른 웹사이트 이동 의심'));
+  window.addEventListener('beforeunload', () => logViolation('beforeunload_navigation', '페이지 이탈 또는 다른 웹사이트 이동 시도'));
+  document.addEventListener('freeze', () => logViolation('page_freeze', '브라우저가 평가 페이지를 백그라운드 처리'));
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) logViolation('fullscreen_exit', '전체화면 종료 감지');
+  });
+  document.addEventListener('paste', e => {
+    if (shouldTrackViolation()) {
+      e.preventDefault();
+      logViolation('paste_blocked', '붙여넣기 시도 차단');
+    }
+  });
+  document.addEventListener('copy', () => logViolation('copy_detected', '복사 시도 감지'));
+  document.addEventListener('cut', () => logViolation('cut_detected', '잘라내기 시도 감지'));
+  document.addEventListener('contextmenu', e => {
+    if (shouldTrackViolation()) {
+      e.preventDefault();
+      logViolation('context_menu_blocked', '우클릭 메뉴 차단');
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (!shouldTrackViolation()) return;
+    const k = String(e.key||'').toLowerCase();
+    if (k === 'alt') logViolation('alt_key_detected', 'Alt 키 입력 감지: Alt+Tab 전환 가능성');
+    if (k === 'tab' && e.altKey) logViolation('alt_tab_detected', 'Alt+Tab 입력 감지');
+    if ((e.ctrlKey || e.metaKey) && ['v','c','x','p','s','u','a','f','l','r','n','t','w'].includes(k)) {
+      e.preventDefault();
+      logViolation('shortcut_blocked', `금지 단축키 감지: ${e.ctrlKey?'Ctrl':'Meta'}+${k.toUpperCase()}`);
+    }
+    if (k === 'f12') {
+      e.preventDefault();
+      logViolation('devtools_key_blocked', 'F12 개발자도구 단축키 감지');
+    }
+  }, true);
+}
+
+async function addLog(type, msg, detail={}) {
+  const fullMsg = detail && Object.keys(detail).length ? `${msg} | ${JSON.stringify(detail)}` : msg;
   if (TEST_MODE) {
-    DEMO.logs.unshift({ id:uid('log'), studentId:currentUser.id, studentNo:currentUser.loginId, name:currentUser.name, classNo:currentUser.classNo, type, msg, time:new Date().toISOString() });
+    DEMO.logs.unshift({ id:uid('log'), studentId:currentUser.id, studentNo:currentUser.loginId, name:currentUser.name, classNo:currentUser.classNo, type, msg:fullMsg, time:new Date().toISOString() });
   } else {
-    if (currentUser?.id) await sb.from('tab_logs').insert({ student_id:currentUser.id, student_name:currentUser.name, class:currentUser.classNo, type, message:msg });
+    if (currentUser?.id) await sb.from('tab_logs').insert({ student_id:currentUser.id, student_name:currentUser.name, class:currentUser.classNo, type, message:fullMsg });
   }
   toast('이탈 로그가 기록되었습니다.');
 }
@@ -2091,9 +2140,10 @@ async function openSubmission(id) {
 
 function updateManualTotalPreview() {
   const inputs = Array.from(document.querySelectorAll('.manual-score-input'));
-  const total = inputs.reduce((sum, inp) => sum + (Number(inp.value)||0), 0);
+  const questionTotal = inputs.reduce((sum, inp) => sum + (Number(inp.value)||0), 0);
+  const total = Math.min(MAX_TOTAL_SCORE, BASE_SCORE + questionTotal);
   const box = $('manualTotalBox');
-  if (box) box.innerHTML = `현재 합계: <b>${total}점</b>`;
+  if (box) box.innerHTML = `현재 합계: <b>${total}점</b> <span style="font-size:12px;color:var(--text-3)">(기본 ${BASE_SCORE}점 + 문항 ${questionTotal}점, 최대 ${MAX_TOTAL_SCORE}점)</span>`;
 }
 
 async function saveManualScore(submissionId, questionId, maxScore) {
@@ -2259,7 +2309,7 @@ async function renderUploadPhotos() {
   const rows = await adminStudentImages();
   $('sec-uploadphotos').innerHTML = `
     <h2 class="page-title">업로드 사진 확인</h2>
-    <p class="page-desc">반별로 학생들이 업로드한 캡처 사진을 학번순으로 확인합니다.</p>
+    <p class="page-desc">반별로 학생들이 업로드한 캡처 사진을 학번순으로 확인합니다. 이상한 사진이나 AI 캡처는 관리자가 바로 삭제할 수 있습니다.</p>
     <div class="card">
       <div class="card-body">
         <div class="table-toolbar">
@@ -2291,10 +2341,30 @@ function drawUploadPhotoRows() {
       <div class="photo-strip">
         ${Array.from({length:10}, (_,i)=>{
           const im = (r.images||[])[i];
-          return im ? `<div class="photo-slot"><img src="${im.url}" onclick="openFs('${im.url}')" title="${r.name} 캡처 ${i+1}"></div>` : `<div class="photo-slot">${i+1}</div>`;
+          return im ? `<div class="photo-slot" style="position:relative"><img src="${im.url}" onclick="openFs('${im.url}')" title="${r.name} 캡처 ${i+1}"><button class="thumb-del" style="right:3px;top:3px;width:20px;height:20px;font-size:11px" title="관리자 삭제" onclick="event.stopPropagation();adminDeleteStudentImage('${im.id}','${im.path||''}','${esc(r.name)}',${i+1})">×</button></div>` : `<div class="photo-slot">${i+1}</div>`;
         }).join('')}
       </div>
     </div>`).join('') : '<div class="empty">조회 결과가 없습니다.</div>';
+}
+
+
+async function adminDeleteStudentImage(imageId, path, studentName, idx) {
+  if (!isAdmin) return;
+  if (!confirm(`${studentName} 학생의 캡처 ${idx}번 이미지를 삭제할까요?
+삭제 후에는 복구할 수 없습니다.`)) return;
+  if (TEST_MODE) {
+    Object.keys(DEMO.images).forEach(k => { DEMO.images[k] = (DEMO.images[k]||[]).filter(x => x.id !== imageId); });
+    toast('이미지가 삭제되었습니다.');
+    return renderUploadPhotos();
+  }
+  if (path) {
+    const { error: stErr } = await sb.storage.from('student-images').remove([path]);
+    if (stErr) return alert('스토리지 이미지 삭제 실패: ' + stErr.message);
+  }
+  const { error: dbErr } = await sb.from('student_images').delete().eq('id', imageId);
+  if (dbErr) return alert('이미지 정보 삭제 실패: ' + dbErr.message);
+  toast('이미지가 삭제되었습니다.');
+  renderUploadPhotos();
 }
 
 async function renderLogs() {
@@ -2327,8 +2397,8 @@ async function renderStudents() {
   const st = await adminStudents();
   $('sec-students').innerHTML = `
     <h2 class="page-title">학생 관리</h2>
-    <p class="page-desc">학생 이름/반은 교사가 바로 수정할 수 있습니다. 단순 이름 오타는 삭제하지 말고 수정 기능을 사용하세요.</p>
-    <div class="notice warn">⚠ 삭제 시 학생 정보와 로그인 계정이 함께 삭제됩니다. 같은 학번으로 재가입해야 하는 경우에만 삭제하세요.</div>
+    <p class="page-desc">가입한 학생의 이름과 반을 수정하거나 계정을 삭제합니다.</p>
+    <div class="notice warn">삭제 시 로그인 계정도 함께 삭제됨 · 단순 이름 오타는 삭제하지 말고 수정 기능을 사용하세요.</div>
     <div class="card">
       <div class="card-body table-wrap">
         <table>
@@ -2341,11 +2411,11 @@ async function renderStudents() {
                 </select>
               </td>
               <td>${s.student_id}</td>
-              <td><input id="stu-name-${s.id}" class="input" value="${esc(s.name)}" style="min-width:120px"></td>
-              <td><button class="btn btn-sm" onclick="updateStudent('${s.id}')">수정 저장</button></td>
+              <td><input id="stu-name-${s.id}" class="input" style="min-width:120px" value="${esc(s.name)}"></td>
+              <td><button class="btn btn-primary btn-sm" onclick="updateStudent('${s.id}')">수정 저장</button></td>
               <td>
                 <button class="btn btn-red btn-sm" onclick="deleteStudent('${s.id}')">삭제</button>
-                <div class="hint" style="margin-top:4px;white-space:nowrap">삭제 시 로그인 계정도 함께 삭제됨</div>
+                <div class="hint">삭제 시 로그인 계정도 함께 삭제됨</div>
               </td>
             </tr>`).join('')}
           </tbody>
@@ -2355,32 +2425,30 @@ async function renderStudents() {
 }
 
 async function updateStudent(id) {
+  if (!isAdmin) return;
   const name = $(`stu-name-${id}`)?.value.trim();
-  const classNo = $(`stu-class-${id}`)?.value;
+  const cls  = $(`stu-class-${id}`)?.value;
   if (!name) return alert('이름을 입력하세요.');
-  if (!classNo) return alert('반을 선택하세요.');
   if (TEST_MODE) {
     const u = DEMO.users.find(x=>x.id===id);
-    if (u) { u.name = name; u.classNo = classNo; }
+    if (u) { u.name = name; u.classNo = cls; }
     toast('학생 정보가 수정되었습니다.');
     return renderStudents();
   }
-  const { error } = await sb.from('students').update({ name, class: classNo }).eq('id', id);
+  const { error } = await sb.from('students').update({ name, class:cls }).eq('id', id);
   if (error) return alert('학생 정보 수정 실패: ' + error.message);
   toast('학생 정보가 수정되었습니다.');
   renderStudents();
 }
 
 async function deleteStudent(id) {
-  if (!confirm('정말 삭제할까요?\n\n삭제 시 students 데이터뿐 아니라 Supabase Auth 로그인 계정도 함께 삭제됩니다.\n단순 이름 오타나 반 오류는 취소 후 수정 저장을 사용하세요.')) return;
-  if (TEST_MODE) {
-    DEMO.users = DEMO.users.filter(u=>u.id!==id);
-    toast('학생 계정이 삭제되었습니다.');
-  } else {
-    const { data, error } = await sb.rpc('admin_delete_student', { p_student_id:id });
-    if (error) return alert('학생 삭제 실패: ' + error.message + '\nSQL migration이 적용되었는지 확인하세요.');
-    toast(data || '학생 계정이 삭제되었습니다.');
-  }
+  if (!confirm('학생을 삭제하시겠습니까?
+삭제 시 로그인 계정도 함께 삭제되어 같은 학번으로 재가입할 수 있습니다.')) return;
+  if (TEST_MODE) { DEMO.users = DEMO.users.filter(u=>u.id!==id); toast('학생이 삭제되었습니다.'); return renderStudents(); }
+  const { data, error } = await sb.rpc('admin_delete_student', { p_student_id:id });
+  if (error) return alert('학생 삭제 실패: ' + error.message + '
+SQL migration이 적용되었는지 확인하세요.');
+  toast(data || '학생 계정이 삭제되었습니다.');
   renderStudents();
 }
 
