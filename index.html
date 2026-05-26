@@ -1,106 +1,2458 @@
--- 광문고 오렌지3 수행평가 시스템 마이그레이션
--- 데이터 삭제 없음 / 기존 학생·문제·제출·이미지 데이터 유지
--- 기능:
--- 1) 학생 캡처 이미지는 관리자만 삭제 가능하도록 RLS/Storage 정책 보강
--- 2) 학생관리 이름/반 수정 및 Auth 계정 포함 학생 삭제 RPC 유지/보강
--- 3) 이탈 로그 감지는 HTML에서 강화됨. DB 데이터 변경 없음.
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>광문고 데이터과학 오렌지3 수행평가</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════
+   광문고 수행평가 — 공공기관 스타일
+   주조색: #003087 (정부24 계열 네이비)
+   강조: #0050C8, 성공: #1A7D3E, 경고: #B45309
+═══════════════════════════════════════ */
+:root {
+  --primary:    #003087;
+  --primary-h:  #002070;
+  --primary-l:  #EDF2FF;
+  --accent:     #0050C8;
+  --green:      #1A7D3E;
+  --green-l:    #EDFAF3;
+  --red:        #B91C1C;
+  --red-l:      #FEF2F2;
+  --amber:      #B45309;
+  --amber-l:    #FFFBEB;
 
-create extension if not exists pgcrypto;
+  --bg:         #F4F6F9;
+  --paper:      #FFFFFF;
+  --border:     #D1D9E6;
+  --border-l:   #E8ECF4;
+  --text:       #0D1B2A;
+  --text-2:     #374151;
+  --text-3:     #6B7280;
+  --text-4:     #9CA3AF;
 
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select coalesce((auth.jwt() ->> 'email') = 'admin@gwangmun.edu', false);
-$$;
+  --shadow-s: 0 1px 3px rgba(0,0,0,.07);
+  --shadow-m: 0 4px 12px rgba(0,0,0,.09);
+  --r: 6px;
+  --r-l: 8px;
+}
 
--- 13반까지 허용 보강
-alter table public.students
-  drop constraint if exists students_class_check;
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-alter table public.students
-  add constraint students_class_check
-  check (class in ('1','2','3','4','5','6','7','8','9','10','11','12','13'));
+body {
+  font-family: 'Noto Sans KR', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+button, input, textarea, select { font-family: inherit; }
+button { cursor: pointer; }
+.hidden { display: none !important; }
 
--- 관리자 학생 정보 수정 정책
-alter table public.students enable row level security;
+/* ── 최상단 유틸바 ── */
+.util-bar {
+  background: var(--primary);
+  height: 36px;
+  display: flex;
+  align-items: center;
+}
+.util-inner {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.util-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: rgba(255,255,255,.75);
+}
+.util-left span:first-child { color: rgba(255,255,255,.9); font-weight: 600; }
+.util-sep { width: 1px; height: 12px; background: rgba(255,255,255,.25); }
+.util-right {
+  font-size: 12px;
+  color: rgba(255,255,255,.7);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.util-right b { color: #fff; }
+.test-chip {
+  background: #FFC107;
+  color: #333;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+}
 
-drop policy if exists "students_admin_update" on public.students;
+/* ── 헤더 ── */
+.header {
+  background: var(--paper);
+  border-bottom: 3px solid var(--primary);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  box-shadow: var(--shadow-m);
+}
+.header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-emblem {
+  width: 42px; height: 42px;
+  background: var(--primary);
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 18px;
+  flex-shrink: 0;
+}
+.brand-text h1 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1.3;
+  letter-spacing: -.3px;
+}
+.brand-text p {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+.header-right { display: flex; align-items: center; gap: 10px; }
+#userLabel { font-size: 13px; color: var(--text-2); font-weight: 600; }
+.logout {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 600;
+  transition: .12s;
+}
+.logout:hover { background: var(--red-l); border-color: var(--red); color: var(--red); }
 
-create policy "students_admin_update"
-on public.students
-for update
-to authenticated
-using (public.is_admin())
-with check (public.is_admin());
+/* ── 페이지 래퍼 ── */
+.page { display: none; }
+.page.on { display: block; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 28px 20px 60px; }
 
-grant select, update, delete on public.students to authenticated;
+/* ── 버튼 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 18px;
+  border-radius: var(--r);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--text-2);
+  transition: .1s;
+}
+.btn:hover { background: var(--bg); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-h); }
+.btn-green { background: var(--green); border-color: var(--green); color: #fff; }
+.btn-green:hover { background: #165f30; }
+.btn-red { background: var(--red); border-color: var(--red); color: #fff; }
+.btn-red:hover { background: #991b1b; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-full { width: 100%; }
+.btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
 
--- 학생 삭제 RPC: students + auth.users 함께 삭제
-create or replace function public.admin_delete_student(p_student_id uuid)
-returns text
-language plpgsql
-security definer
-set search_path = public, auth
-as $$
-declare
-  v_auth_id uuid;
-  v_student_no text;
-begin
-  if not public.is_admin() then
-    raise exception '관리자만 학생 계정을 삭제할 수 있습니다.';
-  end if;
+/* ── 카드 ── */
+.card {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-s);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.card-head {
+  background: #F8FAFF;
+  border-bottom: 1px solid var(--border-l);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.card-title { font-size: 15px; font-weight: 700; color: var(--primary); }
+.card-body { padding: 18px; }
 
-  select auth_id, student_id
-    into v_auth_id, v_student_no
-  from public.students
-  where id = p_student_id;
+/* ── 배지 ── */
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 3px 9px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+.badge.blue   { background: var(--primary-l); border-color: #A5B4FC; color: var(--primary); }
+.badge.green  { background: var(--green-l);   border-color: #86EFAC; color: var(--green); }
+.badge.red    { background: var(--red-l);     border-color: #FCA5A5; color: var(--red); }
+.badge.yellow { background: var(--amber-l);   border-color: #FCD34D; color: var(--amber); }
 
-  if v_auth_id is null then
-    return '학생 정보를 찾을 수 없습니다.';
-  end if;
+/* ── 알림 ── */
+.alert {
+  display: none;
+  padding: 11px 14px;
+  border-radius: var(--r);
+  font-size: 13px;
+  font-weight: 600;
+  margin: 12px 0;
+  border-left: 4px solid;
+}
+.alert.on  { display: block; }
+.a-err  { background: var(--red-l);   border-color: var(--red);   color: var(--red); }
+.a-ok   { background: var(--green-l); border-color: var(--green); color: var(--green); }
+.a-info { background: var(--primary-l); border-color: var(--accent); color: var(--accent); }
+.a-warn { background: var(--amber-l); border-color: var(--amber); color: var(--amber); }
 
-  delete from public.students where id = p_student_id;
-  delete from auth.users where id = v_auth_id;
+/* ── 공지/안내 박스 ── */
+.notice {
+  padding: 12px 16px;
+  border-radius: var(--r);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  border-left: 4px solid;
+}
+.notice.info { background: var(--primary-l); border-color: var(--accent); color: var(--accent); }
+.notice.warn { background: var(--amber-l);   border-color: var(--amber);  color: var(--amber); }
 
-  return coalesce(v_student_no, '학생') || ' 계정이 삭제되었습니다.';
-end;
-$$;
+/* ══════════════════════════════
+   로그인 페이지
+══════════════════════════════ */
+.auth-bg {
+  min-height: calc(100vh - 103px);
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+  background: linear-gradient(160deg, #EEF2FF 0%, #F4F6F9 60%);
+}
+.auth-layout {
+  width: min(940px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 24px;
+  align-items: start;
+}
+@media(max-width: 760px) {
+  .auth-layout { grid-template-columns: 1fr; }
+  .intro { display: none; }
+}
 
-grant execute on function public.admin_delete_student(uuid) to authenticated;
+/* 왼쪽 소개 패널 */
+.intro {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  padding: 32px;
+  box-shadow: var(--shadow-s);
+}
+.intro-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--primary-l);
+  border: 1px solid #A5B4FC;
+  color: var(--primary);
+  padding: 4px 12px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.intro h2 {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1.35;
+  letter-spacing: -.5px;
+  margin-bottom: 10px;
+}
+.intro > p { font-size: 14px; color: var(--text-3); line-height: 1.75; margin-bottom: 24px; }
+.guide-list { display: grid; gap: 10px; }
+.guide-item {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 13px 15px;
+  background: var(--bg);
+  border: 1px solid var(--border-l);
+  border-radius: var(--r);
+}
+.guide-num {
+  width: 24px; height: 24px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  flex-shrink: 0; margin-top: 1px;
+}
+.guide-item b { display: block; font-size: 13px; color: var(--text); margin-bottom: 2px; }
+.guide-item span { font-size: 12px; color: var(--text-3); }
 
--- 학생 이미지 DB row 삭제: 관리자만 가능하도록 보강
-alter table public.student_images enable row level security;
+/* 로그인 카드 */
+.auth-card {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  overflow: hidden;
+  box-shadow: var(--shadow-m);
+}
+.auth-card-head {
+  background: var(--primary);
+  padding: 20px 24px;
+}
+.auth-card-head h2 { font-size: 18px; font-weight: 700; color: #fff; }
+.auth-card-head p  { font-size: 12px; color: rgba(255,255,255,.7); margin-top: 3px; }
+.auth-card-body { padding: 24px; }
 
-drop policy if exists "student_images_delete_own" on public.student_images;
-drop policy if exists "student_images_delete_own_or_admin" on public.student_images;
-drop policy if exists "student_images_delete_own_when_upload_open_or_admin" on public.student_images;
-drop policy if exists "student_images_delete_own_when_class_upload_open_or_admin" on public.student_images;
-drop policy if exists "student_images_admin_delete" on public.student_images;
+.tabs {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.tab {
+  flex: 1; border: none; background: var(--bg);
+  padding: 9px; font-size: 13px; font-weight: 600;
+  color: var(--text-3); transition: .12s;
+}
+.tab.on { background: var(--primary); color: #fff; }
 
-create policy "student_images_admin_delete"
-on public.student_images
-for delete
-to authenticated
-using (public.is_admin());
+/* ── 폼 공통 ── */
+.field { margin-bottom: 14px; }
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  margin-bottom: 6px;
+  letter-spacing: .1px;
+}
+.input, .select, .textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  border-radius: var(--r);
+  padding: 9px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+  color: var(--text);
+}
+.input:focus, .select:focus, .textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,80,200,.1);
+}
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+.hint { font-size: 12px; color: var(--text-4); margin-top: 4px; }
+.login-help {
+  margin-top: 14px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--r);
+  padding: 11px 13px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
 
-grant select, delete on public.student_images to authenticated;
+/* ══════════════════════════════
+   앱 레이아웃 (사이드바 + 메인)
+══════════════════════════════ */
+.app-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media(max-width: 820px) {
+  .app-grid { grid-template-columns: 1fr; }
+  .side { position: static !important; }
+}
 
--- Storage 파일 삭제: 관리자만 가능하도록 보강
--- 학생은 업로드 기간에 업로드/조회는 가능하지만 삭제는 관리자만 가능하게 합니다.
-drop policy if exists "storage_student_images_delete_own_or_admin" on storage.objects;
-drop policy if exists "storage_student_images_delete_own_when_upload_open_or_admin" on storage.objects;
-drop policy if exists "storage_student_images_delete_own_when_class_upload_open_or_admin" on storage.objects;
-drop policy if exists "storage_student_images_admin_delete" on storage.objects;
+/* 사이드바 */
+.side {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-s);
+  position: sticky;
+  top: 80px;
+  overflow: hidden;
+}
+.side-profile {
+  background: var(--primary);
+  padding: 16px;
+}
+.side-profile b { display: block; color: #fff; font-size: 15px; font-weight: 700; }
+.side-profile span { display: block; color: rgba(255,255,255,.7); font-size: 12px; margin-top: 3px; }
+.nav { padding: 8px; }
+.nav button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: var(--r);
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: .1s;
+}
+.nav button:hover { background: var(--bg); color: var(--text); }
+.nav button.on { background: var(--primary-l); color: var(--primary); }
+.nav-sep { height: 1px; background: var(--border-l); margin: 6px 4px; }
 
-create policy "storage_student_images_admin_delete"
-on storage.objects
-for delete
-to authenticated
-using (
-  bucket_id = 'student-images'
-  and public.is_admin()
-);
+/* 메인 */
+.main { min-width: 0; }
+.section { display: none; }
+.section.on { display: block; }
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 4px;
+  letter-spacing: -.3px;
+}
+.page-desc { font-size: 13px; color: var(--text-3); margin-bottom: 18px; }
+
+/* ── 통계 카드 ── */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media(max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stat {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-s);
+}
+.stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.stat-label { font-size: 12px; color: var(--text-3); font-weight: 600; }
+
+/* ── 업로드 ── */
+.upload-panel {
+  border: 1px solid var(--border-l);
+  background: var(--bg);
+  border-radius: var(--r-l);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.drop-zone {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: var(--r-l);
+  background: var(--paper);
+  min-height: 150px;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  transition: .15s;
+  padding: 24px;
+}
+.drop-zone:hover, .drop-zone.over {
+  border-color: var(--accent);
+  background: var(--primary-l);
+}
+.drop-icon {
+  width: 48px; height: 48px;
+  background: var(--primary-l);
+  border-radius: var(--r-l);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px;
+  margin: 0 auto 10px;
+  color: var(--primary);
+}
+.drop-zone b { display: block; color: var(--primary); font-size: 15px; margin-bottom: 4px; }
+.drop-zone span { font-size: 12px; color: var(--text-3); }
+.file-input { display: none; }
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.thumb {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  aspect-ratio: 4/3;
+  background: var(--bg);
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+.thumb-num {
+  position: absolute; left: 6px; bottom: 6px;
+  background: rgba(0,0,0,.65);
+  color: #fff; border-radius: 3px;
+  padding: 2px 7px; font-size: 11px; font-weight: 700;
+}
+.thumb-del {
+  position: absolute; right: 6px; top: 6px;
+  background: rgba(0,0,0,.6); color: #fff;
+  border: none; width: 22px; height: 22px;
+  border-radius: 50%; font-size: 13px; font-weight: 700;
+  line-height: 22px; text-align: center; padding: 0;
+}
+.thumb-del:hover { background: var(--red); }
+
+
+.upload-closed-box {
+  border: 1px solid var(--border);
+  background: #F8FAFF;
+  border-radius: var(--r-l);
+  padding: 16px;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.drop-zone.disabled {
+  cursor: not-allowed;
+  background: #F3F4F6;
+  border-color: var(--border-l);
+  opacity: .78;
+}
+.drop-zone.disabled:hover { background: #F3F4F6; border-color: var(--border-l); }
+
+/* ── 응시 화면: 캡처 참고 분할 화면 ── */
+.exam-split {
+  display: grid;
+  grid-template-columns: minmax(300px, 42%) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.ref-panel {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 110px);
+  display: flex;
+  flex-direction: column;
+}
+.ref-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ref-tab {
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--text-3);
+  border-radius: var(--r);
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ref-tab.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.ref-main {
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  background: var(--bg);
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.ref-main img {
+  width: 100%;
+  max-height: calc(100vh - 260px);
+  object-fit: contain;
+  display: block;
+  cursor: zoom-in;
+}
+.ref-empty {
+  padding: 32px 18px;
+  text-align: center;
+  color: var(--text-4);
+  font-size: 13px;
+  font-weight: 600;
+}
+@media(max-width: 900px) {
+  .exam-split { grid-template-columns: 1fr; }
+  .ref-panel { position: static; max-height: none; }
+  .ref-main img { max-height: 420px; }
+}
+
+/* ── 문제 ── */
+.question {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-s);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.q-head {
+  background: var(--primary-l);
+  border-bottom: 1px solid var(--border-l);
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+}
+.q-no {
+  width: 28px; height: 28px;
+  background: var(--primary);
+  color: #fff; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+  flex-shrink: 0;
+}
+.q-title { font-size: 14px; font-weight: 700; color: var(--primary); }
+.q-score { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--text-3); }
+.q-body { padding: 16px; }
+.q-text { white-space: pre-wrap; line-height: 1.85; color: var(--text); margin-bottom: 12px; font-size: 14px; }
+.q-img { max-width: 100%; max-height: 420px; object-fit: contain; border: 1px solid var(--border); border-radius: var(--r); margin-bottom: 12px; display: block; }
+.answer {
+  width: 100%; min-height: 110px; resize: vertical;
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 11px 12px; font-size: 14px; line-height: 1.7;
+  outline: none; color: var(--text);
+}
+.answer:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,80,200,.1); }
+.answer-read {
+  background: var(--bg);
+  border: 1px solid var(--border-l);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.75;
+}
+.answer-key {
+  margin-top: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-l);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+.score-chip { font-weight: 700; color: var(--primary); }
+
+/* ── 테이블 ── */
+.table-toolbar {
+  display: flex; gap: 10px; align-items: flex-end;
+  flex-wrap: wrap; margin-bottom: 12px;
+}
+.table-toolbar .field { margin: 0; min-width: 140px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 700px; }
+th {
+  background: #F0F4FF;
+  border-bottom: 2px solid var(--border);
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  white-space: nowrap;
+}
+td {
+  border-bottom: 1px solid var(--border-l);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text);
+}
+tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #FAFBFF; }
+
+/* ── 반별 오픈 ── */
+.class-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.class-card {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow-s);
+}
+.class-card b { font-size: 15px; color: var(--text); display: block; margin-bottom: 4px; }
+
+
+.class-open-list { display: grid; gap: 12px; }
+.class-open-row {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-s);
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 70px 1fr 1fr;
+  gap: 14px;
+  align-items: center;
+}
+.class-open-no { font-size: 18px; font-weight: 700; color: var(--text); }
+.open-control {
+  border: 1px solid var(--border);
+  background: #F8FAFF;
+  border-radius: var(--r);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.open-control-label { font-size: 13px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+.open-control-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+@media(max-width: 760px) {
+  .class-open-row { grid-template-columns: 1fr; }
+  .open-control { flex-direction: column; align-items: flex-start; }
+}
+
+/* ── 폼 그리드 ── */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media(max-width: 500px) { .form-grid { grid-template-columns: 1fr; } }
+.question-list { display: grid; gap: 10px; }
+.question-admin {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-l);
+  padding: 14px;
+  box-shadow: var(--shadow-s);
+}
+
+
+
+/* ── 관리자 채점/미리보기/업로드 사진 확인 ── */
+.manual-score-box {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  background: #F8FAFF;
+  border-radius: var(--r);
+  padding: 12px;
+}
+.manual-score-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.manual-score-grid .field { margin: 0; }
+.preview-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.preview-student-frame {
+  border: 2px solid var(--primary-l);
+  border-radius: var(--r-l);
+  background: #fff;
+  padding: 16px;
+}
+.photo-row {
+  display: grid;
+  grid-template-columns: 72px 96px 90px minmax(650px, 1fr);
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-l);
+  padding: 10px 0;
+}
+.photo-row:last-child { border-bottom: none; }
+.photo-strip {
+  display: grid;
+  grid-template-columns: repeat(10, 82px);
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.photo-slot {
+  width: 82px;
+  height: 62px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-4);
+  font-size: 11px;
+  overflow: hidden;
+}
+.photo-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+}
+@media(max-width: 900px) {
+  .manual-score-grid { grid-template-columns: 1fr; }
+  .photo-row { grid-template-columns: 1fr; }
+}
+
+/* ── 모달 ── */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.overlay.on { display: flex; }
+.modal {
+  width: min(900px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--paper);
+  border-radius: var(--r-l);
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+}
+.modal-head {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary);
+  background: #F8FAFF;
+  position: sticky; top: 0; z-index: 2;
+}
+.modal-body { padding: 18px; }
+
+/* ── 전체화면 이미지 ── */
+.fs {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.9);
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+}
+.fs.on { display: flex; }
+.fs img { max-width: 92vw; max-height: 84vh; border-radius: var(--r); }
+
+/* ── 토스트 ── */
+.toast {
+  position: fixed; right: 20px; bottom: 20px;
+  z-index: 400;
+  display: none;
+  background: var(--primary);
+  color: #fff;
+  border-radius: var(--r);
+  padding: 12px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-m);
+  max-width: 280px;
+}
+.toast.on { display: block; }
+
+/* ── 빈 상태 ── */
+.empty {
+  text-align: center;
+  padding: 36px 20px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-l);
+  color: var(--text-4);
+  font-weight: 600;
+  font-size: 13px;
+}
+</style>
+</head>
+<body>
+
+<!-- 유틸 바 -->
+<div class="util-bar">
+  <div class="util-inner">
+    <div class="util-left">
+      <span>광문고등학교</span>
+      <div class="util-sep"></div>
+      <span>데이터과학 수행평가 시스템</span>
+    </div>
+    <div class="util-right">
+      <span id="testChip" class="test-chip" style="display:none">TEST MODE</span>
+      <b>made by 김채연T</b>
+    </div>
+  </div>
+</div>
+
+<!-- 헤더 -->
+<header class="header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-emblem">G</div>
+      <div class="brand-text">
+        <h1>광문고 데이터과학 오렌지3 수행평가</h1>
+        <p>Orange3 실습 캡처 기반 온라인 응시 및 제출 시스템</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="userLabel"></span>
+      <button id="logoutBtn" class="logout hidden" onclick="logout()">로그아웃</button>
+    </div>
+  </div>
+</header>
+
+<!-- ══ 로그인 페이지 ══ -->
+<section id="authPage" class="page on">
+  <div class="auth-bg">
+    <div class="auth-layout">
+
+      <!-- 소개 패널 -->
+      <div class="card intro">
+        <div class="intro-badge">📋 시스템 안내</div>
+        <h2>수행평가 응시를 위한<br>온라인 제출 시스템</h2>
+        <p>학생은 본인의 Orange3 실습 캡처를 업로드하고,<br>선생님이 반별로 공개한 문제에 답안을 작성합니다.</p>
+        <div class="guide-list">
+          <div class="guide-item">
+            <div class="guide-num">1</div>
+            <div>
+              <b>반별 공개</b>
+              <span>선생님이 해당 반 평가 시간에만 문제를 공개합니다.</span>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="guide-num">2</div>
+            <div>
+              <b>캡처 10장 제한</b>
+              <span>본인 실습 파일 캡처를 참고 자료로 업로드합니다.</span>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="guide-num">3</div>
+            <div>
+              <b>1회 제출</b>
+              <span>최종 제출 후 수정할 수 없습니다.</span>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="guide-num">!</div>
+            <div>
+              <b>이탈 로그</b>
+              <span>평가 중 탭 전환과 붙여넣기 시도가 기록됩니다.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 로그인 카드 -->
+      <div class="auth-card">
+        <div class="auth-card-head">
+          <h2>시스템 로그인</h2>
+          <p>학번을 아이디로 사용합니다.</p>
+        </div>
+        <div class="auth-card-body">
+          <div class="tabs">
+            <button id="loginTab" class="tab on" onclick="switchAuth('login')">로그인</button>
+            <button id="regTab"   class="tab"    onclick="switchAuth('reg')">회원가입</button>
+          </div>
+
+          <div id="authAlert" class="alert"></div>
+
+          <div id="loginBox">
+            <div class="field">
+              <label>학번 / 관리자 아이디</label>
+              <input id="loginId" class="input" placeholder="예: 2621101" autocomplete="off" autocapitalize="none" spellcheck="false">
+            </div>
+            <div class="field">
+              <label>비밀번호</label>
+              <input id="loginPw" type="password" class="input" placeholder="비밀번호를 입력하세요" autocomplete="new-password">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="login()">로그인</button>
+            <div class="login-help">
+              학생은 학번으로 로그인합니다.<br>
+              관리자는 발급받은 관리자 아이디로 로그인하세요.<br>
+              학번 예시: <b>2621101</b> = 26년 2학년 1반 1번
+            </div>
+          </div>
+
+          <div id="regBox" class="hidden">
+            <div class="field">
+              <label>학번</label>
+              <input id="regId" class="input" placeholder="예: 2621101" autocomplete="off">
+              <div class="hint">26년 2학년 1반 1번이면 2621101 형식 (7자리)</div>
+            </div>
+            <div class="field">
+              <label>이름</label>
+              <input id="regName" class="input" placeholder="홍길동" autocomplete="off">
+            </div>
+            <div class="field">
+              <label>반</label>
+              <select id="regClass" class="select">
+                <option value="1">1반</option><option value="2">2반</option><option value="3">3반</option>
+                <option value="4">4반</option><option value="5">5반</option><option value="6">6반</option>
+                <option value="7">7반</option><option value="8">8반</option><option value="9">9반</option>
+                <option value="10">10반</option><option value="11">11반</option><option value="12">12반</option><option value="13">13반</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>비밀번호</label>
+              <input id="regPw" type="password" class="input" placeholder="6자 이상" autocomplete="new-password">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="register()">회원가입 후 입장</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══ 앱 페이지 ══ -->
+<section id="appPage" class="page">
+  <div class="wrap">
+    <div class="app-grid">
+
+      <!-- 사이드바 -->
+      <aside class="side">
+        <div class="side-profile">
+          <b id="sideName">사용자</b>
+          <span id="sideMeta">-</span>
+        </div>
+        <nav id="studentNav" class="nav">
+          <button id="nav-home"   class="on" onclick="showStudent('home')">🏠 홈</button>
+          <button id="nav-upload"           onclick="showStudent('upload')">📸 캡처 업로드</button>
+          <button id="nav-exam"             onclick="showStudent('exam')">📝 수행평가 응시</button>
+          <button id="nav-result"           onclick="showStudent('result')">✅ 제출 확인</button>
+        </nav>
+        <nav id="adminNav" class="nav hidden">
+          <button id="nav-dashboard" class="on" onclick="showAdmin('dashboard')">📊 대시보드</button>
+          <button id="nav-questions"         onclick="showAdmin('questions')">❓ 문제 관리</button>
+          <button id="nav-classes"           onclick="showAdmin('classes')">🏫 반별 오픈</button>
+          <button id="nav-uploadphotos"      onclick="showAdmin('uploadphotos')">🖼️ 업로드 사진 확인</button>
+          <div class="nav-sep"></div>
+          <button id="nav-submissions"       onclick="showAdmin('submissions')">📋 제출 현황</button>
+          <button id="nav-preview"           onclick="showAdmin('preview')">👀 수행평가 미리보기</button>
+          <button id="nav-excel"             onclick="showAdmin('excel')">📥 엑셀 출력</button>
+          <button id="nav-logs"              onclick="showAdmin('logs')">🚨 이탈 로그</button>
+          <div class="nav-sep"></div>
+          <button id="nav-students"          onclick="showAdmin('students')">👥 학생 관리</button>
+        </nav>
+      </aside>
+
+      <!-- 메인 -->
+      <main class="main">
+        <section id="sec-home"        class="section on"></section>
+        <section id="sec-upload"      class="section"></section>
+        <section id="sec-exam"        class="section"></section>
+        <section id="sec-result"      class="section"></section>
+        <section id="sec-dashboard"   class="section"></section>
+        <section id="sec-questions"   class="section"></section>
+        <section id="sec-classes"     class="section"></section>
+        <section id="sec-uploadphotos" class="section"></section>
+        <section id="sec-submissions" class="section"></section>
+        <section id="sec-preview"     class="section"></section>
+        <section id="sec-excel"       class="section"></section>
+        <section id="sec-logs"        class="section"></section>
+        <section id="sec-students"    class="section"></section>
+      </main>
+
+    </div>
+  </div>
+</section>
+
+<!-- 모달 -->
+<div id="modal" class="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <span id="modalTitle">상세 보기</span>
+      <button class="btn btn-sm" onclick="closeModal()">닫기</button>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- 전체화면 이미지 -->
+<div id="fs" class="fs" onclick="closeFs()">
+  <img id="fsImg" src="" alt="">
+  <button class="btn" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff" onclick="closeFs()">닫기</button>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- ══════════════════════════════════════════
+     JavaScript — 기존 로직 100% 유지
+══════════════════════════════════════════ -->
+<script>
+const SB_URL = 'https://gicllxmrettiyskreblj.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpY2xseG1yZXR0aXlza3JlYmxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NTc2OTMsImV4cCI6MjA5NDAzMzY5M30.jwUxjxgkGql6-zbzL17j6mR8pUbSxGoELYJg1css2MQ';
+const TEST_MODE = SB_URL.includes('YOUR_') || SB_KEY.includes('YOUR_');
+let sb = null;
+if (!TEST_MODE && window.supabase) sb = supabase.createClient(SB_URL, SB_KEY);
+
+const ADMIN_ID = 'admin', ADMIN_PW = 'gm11154';
+const CLASS_COUNT = 13;
+const CLASS_LIST = Array.from({length:CLASS_COUNT}, (_,i) => String(i+1));
+const BASE_SCORE = 16;
+const MAX_TOTAL_SCORE = 40;
+let lastViolationAt = {};
+function classNum(v) { return Number(String(v).replace(/[^0-9]/g, '')) || 0; }
+function sortByClassNo(a,b) { return classNum(a.classNo ?? a.class ?? a) - classNum(b.classNo ?? b.class ?? b); }
+function normalizeClassRows(rows=[]) {
+  const map = {};
+  rows.forEach(r => { map[String(r.classNo ?? r.class)] = r; });
+  return CLASS_LIST.map(c => ({ classNo:c, isOpen:false, uploadOpen:false, ...(map[c]||{}) })).sort(sortByClassNo);
+}
+
+const DEMO = {
+  users: [
+    { id:'admin', authId:'admin', loginId:'admin', pw:'gm11154', name:'김채연T', classNo:'admin', role:'admin' },
+    { id:'s1', authId:'s1auth', loginId:'2621101', pw:'123456', name:'홍길동', classNo:'1', role:'student' }
+  ],
+  classSettings: CLASS_LIST.map((c,i) => ({ classNo: c, isOpen: i===0, uploadOpen: false })),
+  questions: [
+    { id:'q1', no:1, question_type:'short', score:10, text:'[문제 1]\n다음 분석 기법의 이름을 영어로 쓰시오.\n(정답 예: regression)', imageUrl:'', is_active:true, accepted:['regression','linear regression'] },
+    { id:'q2', no:2, question_type:'short', score:15, text:'[문제 2]\n의사결정트리에서 과적합을 방지하는 대표 방법을 쓰시오.', imageUrl:'', is_active:true, accepted:['pruning','가지치기'] },
+    { id:'q3', no:3, question_type:'short', score:15, text:'[문제 3]\nRandom Forest와 단일 의사결정트리 중 앙상블 모델은 무엇인가?', imageUrl:'', is_active:true, accepted:['random forest','랜덤 포레스트'] }
+  ],
+  images: {}, submissions: [], logs: []
+};
+
+let currentUser = null, isAdmin = false, answers = {}, examActive = false, currentAdminTab = 'dashboard';
+let examRefImages = [], examRefIdx = 0;
+
+const $ = id => document.getElementById(id);
+function uid(p='id') { return p + '-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+function esc(s='') { return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
+function normalizeAnswer(s) { return String(s??'').normalize('NFKC').trim().replace(/\s+/g,'').toLowerCase(); }
+function parseAccepted(s) { return String(s||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean); }
+
+function gradeOne(studentAnswer, accepted, score, questionType='short', override=null) {
+  const maxScore = Number(score||0);
+  const type = questionType || 'short';
+  if (override && override.score !== undefined && override.score !== null) {
+    const manual = Math.max(0, Math.min(maxScore, Number(override.score)||0));
+    return { earned: manual, correct: manual >= maxScore && maxScore > 0, manual:true, note:override.note||'', studentAnswer: studentAnswer||'', accepted: accepted||[], type };
+  }
+  if (type === 'essay') {
+    return { earned: 0, correct:false, manual:false, needsManual:true, studentAnswer: studentAnswer||'', accepted: accepted||[], type };
+  }
+  const n = normalizeAnswer(studentAnswer);
+  const ok = (accepted||[]).some(a => normalizeAnswer(a) === n);
+  return { earned: ok ? maxScore : 0, correct: ok, manual:false, studentAnswer: studentAnswer||'', accepted: accepted||[], type };
+}
+function gradeSubmission(sub, questions, scoreMap={}) {
+  // 제출자는 기본점수 16점에서 시작하고, 문항 점수를 더하되 최종 40점을 넘지 않게 계산합니다.
+  let questionTotal = 0;
+  const detail = {};
+  (questions||[]).forEach(q => {
+    const override = scoreMap[`${sub?.id||''}:${q.id}`] || scoreMap[q.id] || null;
+    const g = gradeOne(sub?.answers?.[q.id]||'', q.accepted||[], q.score||0, q.question_type||q.type||'short', override);
+    detail[q.id] = g; questionTotal += Number(g.earned||0);
+  });
+  const total = Math.min(MAX_TOTAL_SCORE, BASE_SCORE + questionTotal);
+  return { total, questionTotal, detail };
+}
+
+function alertAuth(msg, type='err') {
+  const e = $('authAlert');
+  e.className = 'alert on a-' + type;
+  e.textContent = msg;
+}
+function toast(msg) {
+  const e = $('toast');
+  e.textContent = msg;
+  e.classList.add('on');
+  setTimeout(() => e.classList.remove('on'), 3000);
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  $('testChip').style.display = TEST_MODE ? 'inline-flex' : 'none';
+  setupViolationMonitor();
+  // Enter 키 로그인
+  ['loginId','loginPw'].forEach(id => {
+    $(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+  });
+  if (!TEST_MODE) {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) await restoreSession(session.user);
+  }
+});
+
+function switchAuth(t) {
+  $('loginTab').classList.toggle('on', t==='login');
+  $('regTab').classList.toggle('on',   t==='reg');
+  $('loginBox').classList.toggle('hidden', t!=='login');
+  $('regBox').classList.toggle('hidden',   t!=='reg');
+  $('authAlert').className = 'alert';
+}
+
+async function login() {
+  const rawId = $('loginId').value.trim();
+  const id    = rawId.toLowerCase();
+  const pw    = $('loginPw').value;
+  if (!rawId || !pw) return alertAuth('아이디와 비밀번호를 입력하세요.');
+
+  if (TEST_MODE) {
+    const u = DEMO.users.find(x => x.loginId.toLowerCase()===id && x.pw===pw);
+    if (!u) return alertAuth('아이디 또는 비밀번호가 일치하지 않습니다.');
+    return enter(u);
+  }
+
+  const email = (id === ADMIN_ID) ? 'admin@gwangmun.edu' : `${rawId}@gwangmun.edu`;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+  if (error) {
+    console.error('Supabase login error:', error);
+    return alertAuth(`로그인 실패: ${error.message}`);
+  }
+  await restoreSession(data.user);
+}
+
+async function restoreSession(authUser) {
+  if (authUser.email === 'admin@gwangmun.edu') {
+    return enter({ id:'admin', authId:authUser.id, loginId:'admin', name:'관리자', classNo:'admin', role:'admin' });
+  }
+  const { data: stu, error } = await sb.from('students').select('*').eq('auth_id', authUser.id).maybeSingle();
+  if (error || !stu) {
+    await sb.auth.signOut();
+    return alertAuth('학생 정보를 찾을 수 없습니다. 다시 로그인해 주세요.');
+  }
+  enter({ id:stu.id, authId:authUser.id, loginId:stu.student_id, name:stu.name, classNo:stu.class, role:'student' });
+}
+
+async function register() {
+  const id      = $('regId').value.trim();
+  const name    = $('regName').value.trim();
+  const classNo = $('regClass').value;
+  const pw      = $('regPw').value;
+
+  if (!/^\d{7}$/.test(id))    return alertAuth('학번은 7자리 숫자로 입력하세요. 예: 2621101');
+  if (!name)                   return alertAuth('이름을 입력하세요.');
+  if (pw.length < 6)           return alertAuth('비밀번호는 6자리 이상입니다.');
+
+  if (TEST_MODE) {
+    if (DEMO.users.some(u => u.loginId === id)) return alertAuth('이미 가입된 학번입니다.');
+    const u = { id:uid('stu'), authId:uid('auth'), loginId:id, pw, name, classNo, role:'student' };
+    DEMO.users.push(u);
+    return enter(u);
+  }
+
+  // 학번 중복 확인 — Supabase Auth로 먼저 가입 시도 전에 체크
+  // (RLS 미적용 anon 조회 실패 대비: 오류 무시하고 signUp에서 UNIQUE 제약으로 최종 차단)
+  try {
+    const { data: dup } = await sb.from('students').select('id').eq('student_id', id).maybeSingle();
+    if (dup) return alertAuth('이미 가입된 학번입니다.');
+  } catch (_) { /* RLS로 조회 실패 시 무시 — signUp 후 DB UNIQUE 제약이 최종 차단 */ }
+
+  // Auth 계정 생성
+  const { data, error } = await sb.auth.signUp({ email:`${id}@gwangmun.edu`, password:pw });
+  if (error) return alertAuth('회원가입 실패: ' + error.message);
+
+  // signUp 직후 user 객체 null 방어 (이메일 인증 필요 환경)
+  if (!data?.user) {
+    return alertAuth('이메일 인증이 필요합니다. Supabase에서 "Auto Confirm" 또는 "Confirm user"를 설정해 주세요.', 'warn');
+  }
+
+  // students 테이블에 저장
+  const { error: insErr } = await sb.from('students').insert({
+    auth_id: data.user.id, student_id: id, name, class: classNo
+  });
+  if (insErr) {
+    // Auth 계정만 생성되고 students 저장 실패 시 Auth 계정 삭제 불가(client-side 제한)
+    // → 안내 메시지만 표시
+    return alertAuth('학생 정보 저장 실패: ' + insErr.message + ' (관리자에게 문의하세요.)');
+  }
+
+  // restoreSession으로 students.id를 DB에서 직접 읽어 currentUser에 정확히 세팅
+  // enter(id:null)을 먼저 호출하면 currentUser.id=null 상태로 앱이 열리므로 절대 하지 않음
+  await restoreSession(data.user);
+}
+
+function enter(u) {
+  currentUser = u;
+  isAdmin = u.role === 'admin';
+  $('authPage').classList.remove('on');
+  $('appPage').classList.add('on');
+  $('logoutBtn').classList.remove('hidden');
+  $('userLabel').textContent  = isAdmin ? '관리자' : `${u.name} (${u.loginId})`;
+  $('sideName').textContent   = isAdmin ? '관리자' : u.name;
+  $('sideMeta').textContent   = isAdmin ? '교사 계정' : `${u.classNo}반 · ${u.loginId}`;
+  $('studentNav').classList.toggle('hidden', isAdmin);
+  $('adminNav').classList.toggle('hidden', !isAdmin);
+  if (isAdmin) showAdmin('dashboard');
+  else showStudent('home');
+}
+
+async function logout() {
+  if (!TEST_MODE && sb) await sb.auth.signOut();
+  currentUser = null; isAdmin = false; answers = {}; examActive = false;
+  $('appPage').classList.remove('on');
+  $('authPage').classList.add('on');
+  $('logoutBtn').classList.add('hidden');
+  $('userLabel').textContent = '';
+}
+
+function showOnly(ids, active) {
+  document.querySelectorAll('.section').forEach(sec => sec.classList.remove('on'));
+  ids.forEach(id => { if ($(id)) $(id).classList.toggle('on', id===active); });
+}
+
+async function showStudent(t) {
+  if (isAdmin) return;
+  ['nav-home','nav-upload','nav-exam','nav-result'].forEach(id => $(id).classList.remove('on'));
+  $('nav-'+t).classList.add('on');
+  showOnly(['sec-home','sec-upload','sec-exam','sec-result'], 'sec-'+t);
+  const data = await studentState();
+  examActive = t==='exam' && data.open && !data.submission;
+  renderStudent(t, data);
+}
+
+async function showAdmin(t) {
+  if (!isAdmin) return;
+  currentAdminTab = t;
+  ['nav-dashboard','nav-questions','nav-classes','nav-uploadphotos','nav-submissions','nav-preview','nav-excel','nav-logs','nav-students']
+    .forEach(id => { if ($(id)) $(id).classList.remove('on'); });
+  $('nav-'+t).classList.add('on');
+  showOnly(['sec-dashboard','sec-questions','sec-classes','sec-uploadphotos','sec-submissions','sec-preview','sec-excel','sec-logs','sec-students'], 'sec-'+t);
+  renderAdmin(t);
+}
+
+async function studentState() {
+  if (TEST_MODE) {
+    const classRow = DEMO.classSettings.find(c => c.classNo===currentUser.classNo);
+    const open = !!classRow?.isOpen;
+    return {
+      open,
+      uploadOpen: !!classRow?.uploadOpen,
+      images:     DEMO.images[currentUser.id] || [],
+      questions:  DEMO.questions.filter(q => q.is_active !== false),
+      submission: DEMO.submissions.find(s => s.studentId===currentUser.id),
+      logs:       DEMO.logs.filter(l => l.studentId===currentUser.id)
+    };
+  }
+  const [{ data:cs }, { data:imgs }, { data:sub }, { data:logs }] = await Promise.all([
+    sb.from('class_settings').select('*').eq('class', currentUser.classNo).maybeSingle(),
+    sb.from('student_images').select('*').eq('student_id', currentUser.id).order('order_index'),
+    sb.from('submissions').select('*').eq('student_id', currentUser.id).maybeSingle(),
+    sb.from('tab_logs').select('*').eq('student_id', currentUser.id)
+  ]);
+  let signedImgs = [];
+  for (const im of imgs||[]) {
+    const { data } = await sb.storage.from('student-images').createSignedUrl(im.path, 60*30);
+    signedImgs.push({ ...im, url: data?.signedUrl || '' });
+  }
+  let questions = [];
+  if (cs?.is_open) {
+    const { data:q } = await sb.from('questions').select('*').eq('is_active', true).order('order_num');
+    questions = (q||[]).map(x => ({ id:x.id, no:x.order_num, question_type:x.question_type||'short', score:x.score, text:x.text, imageUrl:x.image_url }));
+  }
+  return { open:!!cs?.is_open, uploadOpen:!!cs?.upload_open, images:signedImgs, questions, submission:sub, logs:logs||[] };
+}
+
+async function renderStudent(tab, data) {
+  renderHome(data);
+  renderUpload(data);
+  if (tab==='exam')   renderExam(data);
+  if (tab==='result') renderResult(data);
+}
+
+function renderHome(data) {
+  const sub = data.submission;
+  $('sec-home').innerHTML = `
+    <h2 class="page-title">학생 홈</h2>
+    <p class="page-desc">수행평가 진행 상태를 확인하세요.</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-num">${data.images.length}</div><div class="stat-label">업로드한 캡처</div></div>
+      <div class="stat"><div class="stat-num">${data.uploadOpen ? '가능' : '마감'}</div><div class="stat-label">캡처 업로드</div></div>
+      <div class="stat"><div class="stat-num">${data.open ? '공개' : '대기'}</div><div class="stat-label">문제 공개 상태</div></div>
+      <div class="stat"><div class="stat-num">${sub ? '완료' : '미제출'}</div><div class="stat-label">제출 상태</div></div>
+      <div class="stat"><div class="stat-num">${data.logs.length}</div><div class="stat-label">이탈 로그</div></div>
+    </div>
+    <div class="notice ${data.open ? 'info' : 'warn'}">
+      ${data.open ? '📢 수행평가가 공개되었습니다. 좌측 메뉴에서 응시를 시작하세요.' : '🔒 아직 수행평가가 공개되지 않았습니다. 선생님의 안내를 기다리세요.'}
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">응시 안내</div></div>
+      <div class="card-body">
+        <ul style="padding-left:20px;line-height:2.1;font-size:13px;color:var(--text-2)">
+          <li>Orange3 실습 캡처는 선생님이 업로드 기간을 열어둔 경우에만 최대 <b>10장</b>까지 업로드할 수 있습니다.</li>
+          <li>문제는 반별 수행평가 시간에만 공개됩니다.</li>
+          <li>최종 제출은 <b>1회</b>만 가능하며, 제출 후 수정할 수 없습니다.</li>
+          <li>평가 중 탭 전환과 붙여넣기 시도는 로그로 기록됩니다.</li>
+        </ul>
+      </div>
+    </div>`;
+}
+
+function renderUpload(data) {
+  const sub = data.submission;
+  const canModify = !!data.uploadOpen && !sub;
+  const statusText = data.uploadOpen ? '업로드 가능' : '업로드 마감';
+  $('sec-upload').innerHTML = `
+    <h2 class="page-title">캡처 업로드</h2>
+    <p class="page-desc">본인이 실습한 Orange3 화면 캡처를 업로드하거나 확인합니다.</p>
+    <div class="notice ${data.uploadOpen ? 'info' : 'warn'}">
+      ${data.uploadOpen
+        ? '📢 현재 캡처 자료 업로드 기간입니다. 제출 전까지 이미지를 추가하거나 삭제할 수 있습니다.'
+        : '🔒 캡처 자료 업로드 기간이 닫혔습니다. 기존에 올린 이미지는 확인만 가능하며 추가·삭제할 수 없습니다.'}
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">이미지 업로드</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="badge ${data.uploadOpen?'green':'yellow'}">${statusText}</span>
+          <span class="badge blue">${data.images.length}/10장</span>
+        </div>
+      </div>
+      <div class="card-body">
+        ${canModify ? `
+          <div class="upload-panel">
+            <label class="drop-zone" id="dropZone">
+              <div>
+                <div class="drop-icon">📁</div>
+                <b>이미지 선택 또는 드래그</b>
+                <span>PNG/JPG · 최대 10장 · 업로드 기간 중에만 추가·삭제 가능</span>
+              </div>
+              <input id="fileInput" class="file-input" type="file" multiple accept="image/*" onchange="handleImgs(event)">
+            </label>
+          </div>` : `
+          <div class="upload-closed-box">
+            ${sub ? '제출이 완료되어 캡처 이미지를 수정할 수 없습니다.' : '업로드 기간이 닫혀 있어 캡처 이미지를 추가하거나 삭제할 수 없습니다.'}
+          </div>`}
+        <div class="image-grid">
+          ${data.images.length
+            ? data.images.map((im,i) => `
+                <div class="thumb">
+                  <img src="${im.url}" onclick="openFs('${im.url}')">
+                  <span class="thumb-num">${i+1}</span>
+                  ${canModify ? `<button class="thumb-del" onclick="deleteImg('${im.id}','${im.path||''}')">×</button>` : ''}
+                </div>`).join('')
+            : '<div class="empty">아직 업로드한 이미지가 없습니다.</div>'}
+        </div>
+      </div>
+    </div>`;
+  if (canModify) setTimeout(() => bindDropZone(), 0);
+}
+
+function bindDropZone() {
+  const dz = $('dropZone');
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFileList(e.dataTransfer.files); });
+}
+
+async function handleImgs(e) { await handleFileList(e.target.files); e.target.value = ''; }
+
+async function handleFileList(files) {
+  if (!currentUser?.id || !currentUser?.authId) return alert('로그인 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+  const data = await studentState();
+  if (!data.uploadOpen) return alert('현재 캡처 자료 업로드 기간이 아닙니다. 기존 이미지는 확인만 가능합니다.');
+  if (data.submission) return alert('이미 제출 완료되어 캡처 이미지를 수정할 수 없습니다.');
+  const list = Array.from(files||[]).filter(f => f.type.startsWith('image/'));
+  if (data.images.length + list.length > 10) return alert('최대 10장까지 업로드할 수 있습니다.');
+  if (TEST_MODE) {
+    DEMO.images[currentUser.id] = data.images.concat(list.map(f => ({ id:uid('img'), url:URL.createObjectURL(f), name:f.name })));
+    return showStudent('upload');
+  }
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i];
+    const ext = f.name.split('.').pop();
+    const storagePath = `${currentUser.authId}/${Date.now()}-${i}.${ext}`;
+    const { error: upErr } = await sb.storage.from('student-images').upload(storagePath, f, { upsert:false });
+    if (upErr) return alert('업로드 실패: ' + upErr.message);
+    const { error: dbErr } = await sb.from('student_images').insert({ student_id:currentUser.id, path:storagePath, order_index:data.images.length+i });
+    if (dbErr) return alert('이미지 정보 저장 실패: ' + dbErr.message);
+  }
+  showStudent('upload');
+}
+
+async function deleteImg(id, path) {
+  const data = await studentState();
+  if (!data.uploadOpen) return alert('현재 캡처 자료 업로드 기간이 아닙니다. 삭제할 수 없습니다.');
+  if (data.submission) return alert('이미 제출 완료되어 캡처 이미지를 수정할 수 없습니다.');
+  if (!confirm('삭제할까요?')) return;
+  if (TEST_MODE) {
+    DEMO.images[currentUser.id] = (DEMO.images[currentUser.id]||[]).filter(x => x.id!==id);
+    return showStudent('upload');
+  }
+  await sb.storage.from('student-images').remove([path]);
+  await sb.from('student_images').delete().eq('id', id);
+  showStudent('upload');
+}
+
+function openFs(url) { $('fsImg').src = url; $('fs').classList.add('on'); }
+function closeFs()   { $('fs').classList.remove('on'); }
+
+function renderExam(data) {
+  const sub = data.submission;
+  if (!data.open) {
+    $('sec-exam').innerHTML = `<h2 class="page-title">수행평가 응시</h2><p class="page-desc">문제 공개 후 응시할 수 있습니다.</p><div class="empty">수행평가가 아직 공개되지 않았습니다.</div>`;
+    return;
+  }
+  if (sub) {
+    $('sec-exam').innerHTML = `<h2 class="page-title">수행평가 응시</h2><p class="page-desc">이미 제출했습니다.</p><div class="empty">제출 확인 메뉴에서 답안을 확인하세요.</div>`;
+    return;
+  }
+  examRefImages = data.images || [];
+  if (examRefIdx >= examRefImages.length) examRefIdx = 0;
+  const refHtml = examRefImages.length ? `
+    <div class="ref-tabs" id="refTabs">
+      ${examRefImages.map((im,i)=>`<button class="ref-tab ${i===examRefIdx?'on':''}" onclick="setExamRefImage(${i})">캡처 ${i+1}</button>`).join('')}
+    </div>
+    <div class="ref-main">
+      <img id="examRefImg" src="${examRefImages[examRefIdx].url}" onclick="openFs(this.src)" alt="참고 캡처">
+    </div>
+    <p class="hint" style="margin-top:8px">캡처 탭을 눌러 이미지를 바꾸고, 이미지를 클릭하면 크게 볼 수 있습니다.</p>` : `
+    <div class="ref-empty">업로드한 캡처 이미지가 없습니다.<br>필요한 캡처는 업로드 기간에 미리 등록하세요.</div>`;
+
+  $('sec-exam').innerHTML = `
+    <h2 class="page-title">수행평가 응시</h2>
+    <p class="page-desc">왼쪽의 내 캡처 이미지를 참고하며 오른쪽 문제에 답안을 작성하세요.</p>
+    <div class="notice warn">⚠ 응시 중 탭 전환 및 붙여넣기 시도가 기록됩니다.</div>
+    <div class="exam-split">
+      <aside class="card ref-panel">
+        <div class="card-head"><div class="card-title">내 캡처 참고 화면</div><span class="badge blue">${examRefImages.length}/10장</span></div>
+        <div class="card-body">${refHtml}</div>
+      </aside>
+      <div>
+        ${data.questions.map(q => `
+          <div class="question">
+            <div class="q-head">
+              <div class="q-no">${q.no}</div>
+              <div class="q-title">문제 ${q.no}</div>
+              <div class="q-score">${q.score}점</div>
+            </div>
+            <div class="q-body">
+              <div class="q-text">${esc(q.text)}</div>
+              ${q.imageUrl ? `<img class="q-img" src="${q.imageUrl}">` : ''}
+              <textarea class="answer" placeholder="답안을 작성하세요."
+                oninput="answers['${q.id}']=this.value">${answers[q.id]||''}</textarea>
+            </div>
+          </div>`).join('')}
+        <button class="btn btn-green btn-full" style="margin-top:8px" onclick="submitExam()">최종 제출하기</button>
+      </div>
+    </div>`;
+}
+
+function setExamRefImage(i) {
+  examRefIdx = i;
+  const img = $('examRefImg');
+  if (img && examRefImages[i]) img.src = examRefImages[i].url;
+  document.querySelectorAll('.ref-tab').forEach((b,idx)=>b.classList.toggle('on', idx===i));
+}
+
+async function submitExam() {
+  const data = await studentState();
+  const empty = data.questions.filter(q => !String(answers[q.id]||'').trim()).length;
+  if (empty && !confirm(`미작성 문항이 ${empty}개 있습니다. 그래도 제출할까요?`)) return;
+  const payload = {};
+  data.questions.forEach(q => payload[q.id] = answers[q.id]||'');
+  if (TEST_MODE) {
+    DEMO.submissions.push({ id:uid('sub'), studentId:currentUser.id, studentNo:currentUser.loginId, name:currentUser.name, classNo:currentUser.classNo, answers:payload, submittedAt:new Date().toISOString(), logCount:data.logs.length });
+    examActive = false;
+    toast('제출이 완료되었습니다.');
+    return showStudent('result');
+  }
+  if (!currentUser?.id) return alert('로그인 정보 오류입니다. 다시 로그인해 주세요.');
+  const { error } = await sb.from('submissions').insert({ student_id:currentUser.id, answers:payload, tab_log_count:data.logs.length });
+  if (error) return alert(error.code==='23505' ? '이미 제출했습니다.' : '제출 실패: '+error.message);
+  examActive = false;
+  toast('제출이 완료되었습니다.');
+  showStudent('result');
+}
+
+async function renderResult(data) {
+  const sub = data.submission;
+  if (!sub) {
+    $('sec-result').innerHTML = `<h2 class="page-title">제출 확인</h2><p class="page-desc">내가 제출한 답안을 확인합니다.</p><div class="empty">아직 제출한 답안이 없습니다.</div>`;
+    return;
+  }
+  let qs = data.questions;
+  if (!qs.length) {
+    qs = TEST_MODE
+      ? DEMO.questions
+      : ((await sb.from('questions').select('*').order('order_num')).data||[]).map(x => ({ id:x.id, no:x.order_num, question_type:x.question_type||'short', score:x.score, text:x.text, imageUrl:x.image_url }));
+  }
+  $('sec-result').innerHTML = `
+    <h2 class="page-title">제출 확인</h2>
+    <p class="page-desc">내가 제출한 답안을 확인합니다.</p>
+    ${qs.map(q => `
+      <div class="question">
+        <div class="q-head">
+          <div class="q-no">${q.no}</div>
+          <div class="q-title">문제 ${q.no}</div>
+          <div class="q-score">${q.score}점</div>
+        </div>
+        <div class="q-body">
+          <div class="q-text">${esc(q.text)}</div>
+          <div class="answer-read">${esc(sub.answers?.[q.id]||'(미작성)')}</div>
+        </div>
+      </div>`).join('')}`;
+}
+
+
+function shouldTrackViolation() {
+  return !!(currentUser && !isAdmin && examActive);
+}
+function logViolation(type, msg, detail={}) {
+  if (!shouldTrackViolation()) return;
+  const now = Date.now();
+  const key = type + ':' + msg;
+  if (lastViolationAt[key] && now - lastViolationAt[key] < 1200) return;
+  lastViolationAt[key] = now;
+  addLog(type, msg, detail);
+}
+function setupViolationMonitor() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) logViolation('visibility_hidden', '다른 탭·앱·웹사이트 접근 의심 감지', { visibilityState:document.visibilityState });
+    else logViolation('visibility_return', '평가 화면으로 복귀', { visibilityState:document.visibilityState });
+  });
+  window.addEventListener('blur', () => logViolation('window_blur_alt_tab_suspected', 'Alt+Tab 또는 다른 창/앱 전환 의심 감지'));
+  window.addEventListener('focus', () => logViolation('window_focus_return', '평가 창으로 다시 돌아옴'));
+  window.addEventListener('pagehide', () => logViolation('pagehide_navigation', '새로고침·닫기·다른 웹사이트 이동 의심'));
+  window.addEventListener('beforeunload', () => logViolation('beforeunload_navigation', '페이지 이탈 또는 다른 웹사이트 이동 시도'));
+  document.addEventListener('freeze', () => logViolation('page_freeze', '브라우저가 평가 페이지를 백그라운드 처리'));
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) logViolation('fullscreen_exit', '전체화면 종료 감지');
+  });
+  document.addEventListener('paste', e => {
+    if (shouldTrackViolation()) {
+      e.preventDefault();
+      logViolation('paste_blocked', '붙여넣기 시도 차단');
+    }
+  });
+  document.addEventListener('copy', () => logViolation('copy_detected', '복사 시도 감지'));
+  document.addEventListener('cut', () => logViolation('cut_detected', '잘라내기 시도 감지'));
+  document.addEventListener('contextmenu', e => {
+    if (shouldTrackViolation()) {
+      e.preventDefault();
+      logViolation('context_menu_blocked', '우클릭 메뉴 차단');
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (!shouldTrackViolation()) return;
+    const k = String(e.key||'').toLowerCase();
+    if (k === 'alt') logViolation('alt_key_detected', 'Alt 키 입력 감지: Alt+Tab 전환 가능성');
+    if (k === 'tab' && e.altKey) logViolation('alt_tab_detected', 'Alt+Tab 입력 감지');
+    if ((e.ctrlKey || e.metaKey) && ['v','c','x','p','s','u','a','f','l','r','n','t','w'].includes(k)) {
+      e.preventDefault();
+      logViolation('shortcut_blocked', `금지 단축키 감지: ${e.ctrlKey?'Ctrl':'Meta'}+${k.toUpperCase()}`);
+    }
+    if (k === 'f12') {
+      e.preventDefault();
+      logViolation('devtools_key_blocked', 'F12 개발자도구 단축키 감지');
+    }
+  }, true);
+}
+
+async function addLog(type, msg, detail={}) {
+  const fullMsg = detail && Object.keys(detail).length ? `${msg} | ${JSON.stringify(detail)}` : msg;
+  if (TEST_MODE) {
+    DEMO.logs.unshift({ id:uid('log'), studentId:currentUser.id, studentNo:currentUser.loginId, name:currentUser.name, classNo:currentUser.classNo, type, msg:fullMsg, time:new Date().toISOString() });
+  } else {
+    if (currentUser?.id) await sb.from('tab_logs').insert({ student_id:currentUser.id, student_name:currentUser.name, class:currentUser.classNo, type, message:fullMsg });
+  }
+  toast('이탈 로그가 기록되었습니다.');
+}
+
+/* ── 관리자 데이터 조회 ── */
+async function adminStudents() {
+  if (TEST_MODE) return DEMO.users.filter(u=>u.role==='student').map(u=>({ id:u.id, student_id:u.loginId, name:u.name, class:u.classNo }));
+  const { data } = await sb.from('students').select('*').order('class').order('student_id');
+  return data||[];
+}
+async function adminQuestions() {
+  if (TEST_MODE) return DEMO.questions.map(q => ({ question_type:'short', ...q }));
+  const [{ data:q }, { data:a }] = await Promise.all([
+    sb.from('questions').select('*').order('order_num'),
+    sb.from('question_answers').select('*')
+  ]);
+  const amap = {};
+  (a||[]).forEach(x => amap[x.question_id] = x.accepted_answers||[]);
+  return (q||[]).map(x => ({ id:x.id, no:x.order_num, question_type:x.question_type||'short', score:x.score, text:x.text, imageUrl:x.image_url, imagePath:x.image_path, is_active:x.is_active, accepted:amap[x.id]||[] }));
+}
+async function adminClasses() {
+  if (TEST_MODE) return normalizeClassRows(DEMO.classSettings);
+  const { data } = await sb.from('class_settings').select('*');
+  return normalizeClassRows((data||[]).map(c => ({ classNo:c.class, isOpen:!!c.is_open, uploadOpen:!!c.upload_open })));
+}
+async function adminSubs() {
+  if (TEST_MODE) return DEMO.submissions.map(s => ({ ...s, students:{ class:s.classNo, student_id:s.studentNo, name:s.name }, submitted_at:s.submittedAt, tab_log_count:s.logCount }));
+  const { data } = await sb.from('submissions').select('*, students(name,student_id,class)').order('submitted_at', { ascending:false });
+  return data||[];
+}
+async function adminLogs() {
+  if (TEST_MODE) return DEMO.logs;
+  const { data } = await sb.from('tab_logs').select('*, students(name,student_id,class)').order('detected_at', { ascending:false }).limit(300);
+  return data||[];
+}
+async function adminScores() {
+  if (TEST_MODE) return [];
+  const { data } = await sb.from('submission_scores').select('*');
+  return data||[];
+}
+async function adminStudentImages() {
+  const students = await adminStudents();
+  const byId = {};
+  students.forEach(s => byId[s.id] = { ...s, images:[] });
+  if (TEST_MODE) {
+    students.forEach(s => { byId[s.id].images = (DEMO.images[s.id]||[]).map((im,i)=>({ ...im, order_index:i })); });
+    return Object.values(byId).sort((a,b)=>String(a.class).localeCompare(String(b.class),'ko',{numeric:true})||String(a.student_id).localeCompare(String(b.student_id),'ko',{numeric:true}));
+  }
+  const { data:imgs } = await sb.from('student_images').select('*').order('order_index');
+  for (const im of imgs||[]) {
+    if (!byId[im.student_id]) continue;
+    const { data } = await sb.storage.from('student-images').createSignedUrl(im.path, 60*30);
+    byId[im.student_id].images.push({ ...im, url:data?.signedUrl||'' });
+  }
+  return Object.values(byId).sort((a,b)=>String(a.class).localeCompare(String(b.class),'ko',{numeric:true})||String(a.student_id).localeCompare(String(b.student_id),'ko',{numeric:true}));
+}
+
+async function renderAdmin(t) {
+  if (t==='dashboard')   renderDashboard();
+  if (t==='questions')   renderQuestions();
+  if (t==='classes')     renderClasses();
+  if (t==='uploadphotos') renderUploadPhotos();
+  if (t==='submissions') renderSubs();
+  if (t==='preview')     renderPreview();
+  if (t==='excel')       renderExcelExport();
+  if (t==='logs')        renderLogs();
+  if (t==='students')    renderStudents();
+}
+
+async function renderDashboard() {
+  const [st, subs, cls, logs, q, gradedRows] = await Promise.all([adminStudents(), adminSubs(), adminClasses(), adminLogs(), adminQuestions(), getGradedRows()]);
+  const submittedRows = gradedRows.filter(r => r.total !== null);
+  const avg = submittedRows.length ? (submittedRows.reduce((a,b)=>a+Number(b.total||0),0)/submittedRows.length).toFixed(1) : '0.0';
+  $('sec-dashboard').innerHTML = `
+    <h2 class="page-title">관리자 대시보드</h2>
+    <p class="page-desc">수행평가 전체 현황입니다.</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-num">${st.length}</div><div class="stat-label">전체 학생</div></div>
+      <div class="stat"><div class="stat-num">${subs.length}</div><div class="stat-label">제출 완료</div></div>
+      <div class="stat"><div class="stat-num">${cls.filter(c=>c.isOpen).length}</div><div class="stat-label">수행평가 공개 반</div></div>
+      <div class="stat"><div class="stat-num">${cls.filter(c=>c.uploadOpen).length}</div><div class="stat-label">캡처 업로드 오픈 반</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">반별 오픈 현황</div>
+        <span class="badge blue">최종점수 평균 ${avg}점</span>
+      </div>
+      <div class="card-body table-wrap">
+        <table>
+          <thead><tr><th>반</th><th>캡처 업로드</th><th>수행평가 공개</th></tr></thead>
+          <tbody>${cls.map(c=>`<tr><td>${c.classNo}반</td><td><span class="badge ${c.uploadOpen?'green':'yellow'}">${c.uploadOpen?'오픈':'잠김'}</span></td><td><span class="badge ${c.isOpen?'green':'yellow'}">${c.isOpen?'공개':'비공개'}</span></td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function renderQuestions() {
+  const q = await adminQuestions();
+  $('sec-questions').innerHTML = `
+    <h2 class="page-title">문제 관리</h2>
+    <p class="page-desc">문제 유형을 선택하고, 주관식은 정답/유사답안을 기준으로 자동채점하며 서술형은 직접 채점합니다.</p>
+    <div class="card">
+      <div class="card-head"><div class="card-title">문제 추가</div></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field"><label>문제 번호</label><input id="qNo" class="input" type="number" min="1"></div>
+          <div class="field"><label>배점</label><input id="qScore" class="input" type="number" min="1"></div>
+        </div>
+        <div class="field">
+          <label>문제 유형</label>
+          <select id="qType" class="select" onchange="toggleAcceptedHelp()">
+            <option value="short">주관식 - 정답 기준 자동채점</option>
+            <option value="essay">서술형 - 교사 직접 채점</option>
+          </select>
+        </div>
+        <div class="field"><label>문제 텍스트</label><textarea id="qText" class="textarea" rows="5" placeholder="문제 내용을 입력하세요."></textarea></div>
+        <div class="field" id="qAcceptedWrap">
+          <label>정답 및 유사 답안</label>
+          <textarea id="qAccepted" class="textarea" rows="4" placeholder="regression&#10;linear regression&#10;회귀분석"></textarea>
+          <div class="hint">주관식만 사용합니다. 한 줄에 하나씩 입력. 대소문자 무시, 앞뒤 공백 제거 후 완전일치 채점.</div>
+        </div>
+        <div class="field"><label>문제 이미지 (선택)</label><input id="qImg" class="input" type="file" accept="image/*"></div>
+        <button class="btn btn-primary" onclick="addQuestion()">문제 저장</button>
+      </div>
+    </div>
+    <div class="question-list">
+      ${q.map(x => `
+        <div class="question-admin">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <span class="badge blue">${x.no}번</span>
+              <span class="badge ${x.question_type==='essay'?'yellow':''}">${x.question_type==='essay'?'서술형':'주관식'}</span>
+              <span class="badge">${x.score}점</span>
+              ${x.is_active===false ? '<span class="badge yellow">비활성</span>' : ''}
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
+              <button class="btn btn-sm" onclick="editQuestion('${x.id}')">수정</button>
+              <button class="btn btn-sm" onclick="toggleQuestion('${x.id}',${x.is_active!==false})">${x.is_active===false?'활성화':'비활성화'}</button>
+              <button class="btn btn-red btn-sm" onclick="deleteQuestion('${x.id}')">삭제</button>
+            </div>
+          </div>
+          <p style="margin-top:10px;white-space:pre-wrap;font-size:13px;line-height:1.75">${esc(x.text)}</p>
+          ${x.imageUrl ? `<img src="${x.imageUrl}" style="max-width:260px;max-height:160px;object-fit:contain;border:1px solid var(--border);border-radius:var(--r);margin-top:10px">` : ''}
+          <div class="answer-key"><b>채점 방식:</b> ${x.question_type==='essay'?'교사 직접 채점':'자동채점'}<br><b>인정 답안:</b> ${x.question_type==='essay'?'서술형은 인정답안 미사용':esc((x.accepted||[]).join(' / ')||'미입력')}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function toggleAcceptedHelp() {
+  const type = $('qType')?.value || 'short';
+  const wrap = $('qAcceptedWrap');
+  if (wrap) wrap.style.display = type === 'essay' ? 'none' : '';
+}
+
+async function addQuestion() {
+  const no       = Number($('qNo').value);
+  const score    = Number($('qScore').value);
+  const type     = $('qType')?.value || 'short';
+  const text     = $('qText').value.trim();
+  const file     = $('qImg').files[0];
+  const accepted = type === 'essay' ? [] : parseAccepted($('qAccepted').value);
+
+  if (!no||!score||!text) return alert('문제 번호, 배점, 내용을 입력하세요.');
+  if (type === 'short' && !accepted.length && !confirm('정답/유사답안이 비어 있습니다. 자동채점에서 0점 처리됩니다. 계속할까요?')) return;
+
+  if (TEST_MODE) {
+    DEMO.questions.push({ id:uid('q'), no, question_type:type, score, text, imageUrl:file?URL.createObjectURL(file):'', is_active:true, accepted });
+    DEMO.questions.sort((a,b)=>a.no-b.no);
+    return renderQuestions();
+  }
+  let image_url = '', image_path = '';
+  if (file) {
+    const ext = file.name.split('.').pop();
+    image_path = `questions/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error:upErr } = await sb.storage.from('question-images').upload(image_path, file, { upsert:false });
+    if (upErr) return alert('이미지 업로드 실패: ' + upErr.message);
+    const { data:u } = sb.storage.from('question-images').getPublicUrl(image_path);
+    image_url = u.publicUrl;
+  }
+  const { data:q, error } = await sb.from('questions').insert({ order_num:no, score, question_type:type, text, image_url, image_path, is_active:true }).select('id').single();
+  if (error) return alert('저장 실패: ' + error.message);
+  const { error:aErr } = await sb.from('question_answers').insert({ question_id:q.id, accepted_answers:accepted });
+  if (aErr) return alert('정답 저장 실패: ' + aErr.message);
+  renderQuestions();
+}
+
+async function editQuestion(id) {
+  const qs = await adminQuestions();
+  const q = qs.find(x => x.id === id);
+  if (!q) return alert('문제를 찾을 수 없습니다.');
+  $('modalTitle').textContent = `문제 ${q.no} 수정`;
+  $('modalBody').innerHTML = `
+    <div class="form-grid">
+      <div class="field"><label>문제 번호</label><input id="editQNo" class="input" type="number" min="1" value="${q.no}"></div>
+      <div class="field"><label>배점</label><input id="editQScore" class="input" type="number" min="0" step="0.5" value="${q.score}"></div>
+    </div>
+    <div class="field">
+      <label>문제 유형</label>
+      <select id="editQType" class="select" onchange="document.getElementById('editAcceptedWrap').style.display=this.value==='essay'?'none':''">
+        <option value="short" ${q.question_type!=='essay'?'selected':''}>주관식 - 정답 기준 자동채점</option>
+        <option value="essay" ${q.question_type==='essay'?'selected':''}>서술형 - 교사 직접 채점</option>
+      </select>
+    </div>
+    <div class="field"><label>문제 텍스트</label><textarea id="editQText" class="textarea" rows="6">${esc(q.text)}</textarea></div>
+    <div class="field" id="editAcceptedWrap" style="${q.question_type==='essay'?'display:none':''}">
+      <label>정답 및 유사 답안</label>
+      <textarea id="editQAccepted" class="textarea" rows="5">${esc((q.accepted||[]).join('\n'))}</textarea>
+      <div class="hint">채점 과정에서 추가 인정할 답안을 한 줄에 하나씩 추가하세요.</div>
+    </div>
+    <div class="field"><label>문제 이미지 교체 (선택)</label><input id="editQImg" class="input" type="file" accept="image/*"></div>
+    ${q.imageUrl ? `<div class="field"><label>현재 이미지</label><img src="${q.imageUrl}" style="max-width:100%;max-height:260px;object-fit:contain;border:1px solid var(--border);border-radius:var(--r)"></div>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveQuestionEdit('${q.id}')">수정 저장</button>
+      <button class="btn" onclick="closeModal()">취소</button>
+    </div>`;
+  $('modal').classList.add('on');
+}
+
+async function saveQuestionEdit(id) {
+  const no = Number($('editQNo').value);
+  const score = Number($('editQScore').value);
+  const type = $('editQType').value || 'short';
+  const text = $('editQText').value.trim();
+  const accepted = type === 'essay' ? [] : parseAccepted($('editQAccepted').value);
+  const file = $('editQImg')?.files?.[0];
+  if (!no || !text) return alert('문제 번호와 문제 내용을 입력하세요.');
+  if (score < 0) return alert('배점은 0점 이상이어야 합니다.');
+  if (type === 'short' && !accepted.length && !confirm('정답/유사답안이 비어 있습니다. 계속할까요?')) return;
+  if (TEST_MODE) {
+    const q = DEMO.questions.find(x=>x.id===id);
+    if (q) Object.assign(q, { no, score, question_type:type, text, accepted, imageUrl:file?URL.createObjectURL(file):q.imageUrl });
+    DEMO.questions.sort((a,b)=>a.no-b.no);
+    closeModal();
+    renderQuestions();
+    return;
+  }
+  const update = { order_num:no, score, question_type:type, text };
+  if (file) {
+    const ext = file.name.split('.').pop();
+    const image_path = `questions/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error:upErr } = await sb.storage.from('question-images').upload(image_path, file, { upsert:false });
+    if (upErr) return alert('이미지 업로드 실패: ' + upErr.message);
+    const { data:u } = sb.storage.from('question-images').getPublicUrl(image_path);
+    update.image_path = image_path;
+    update.image_url = u.publicUrl;
+  }
+  const { error:qErr } = await sb.from('questions').update(update).eq('id', id);
+  if (qErr) return alert('문제 수정 실패: ' + qErr.message);
+  const { error:aErr } = await sb.from('question_answers').upsert({ question_id:id, accepted_answers:accepted }, { onConflict:'question_id' });
+  if (aErr) return alert('정답 수정 실패: ' + aErr.message);
+  closeModal();
+  renderQuestions();
+}
+
+async function deleteQuestion(id) {
+  if (!confirm('삭제할까요?')) return;
+  if (TEST_MODE) { DEMO.questions = DEMO.questions.filter(q=>q.id!==id); }
+  else await sb.from('questions').delete().eq('id', id);
+  renderQuestions();
+}
+
+async function toggleQuestion(id, active) {
+  if (TEST_MODE) { const q = DEMO.questions.find(x=>x.id===id); q.is_active = !active; }
+  else await sb.from('questions').update({ is_active:!active }).eq('id', id);
+  renderQuestions();
+}
+
+async function renderClasses() {
+  const cls = await adminClasses();
+  $('sec-classes').innerHTML = `
+    <h2 class="page-title">반별 오픈 관리</h2>
+    <p class="page-desc">캡처 업로드와 수행평가 공개를 반별로 설정합니다.</p>
+    <div class="notice info">📸 <b>캡처 업로드</b>: 수행평가 전날 미리 열어두세요. &nbsp; | &nbsp; 📝 <b>수행평가 공개</b>: 해당 반 시험 시간에 열고 끝나면 닫으세요.</div>
+    <div class="class-open-list">
+      ${cls.map(c => `
+        <div class="class-open-row">
+          <div class="class-open-no">${c.classNo}반</div>
+          <div class="open-control">
+            <span class="open-control-label">📸 캡처 업로드</span>
+            <span class="open-control-actions">
+              <span class="badge ${c.uploadOpen?'green':'yellow'}">${c.uploadOpen?'오픈':'잠김'}</span>
+              <button class="btn ${c.uploadOpen?'btn-red':'btn-primary'} btn-sm" onclick="toggleUploadClass('${c.classNo}',${c.uploadOpen})">${c.uploadOpen?'닫기':'열기'}</button>
+            </span>
+          </div>
+          <div class="open-control">
+            <span class="open-control-label">📝 수행평가 공개</span>
+            <span class="open-control-actions">
+              <span class="badge ${c.isOpen?'green':'yellow'}">${c.isOpen?'공개':'비공개'}</span>
+              <button class="btn ${c.isOpen?'btn-red':'btn-primary'} btn-sm" onclick="toggleClass('${c.classNo}',${c.isOpen})">${c.isOpen?'닫기':'열기'}</button>
+            </span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function toggleUploadClass(classNo, open) {
+  if (!isAdmin) return;
+  if (TEST_MODE) {
+    const row = DEMO.classSettings.find(c=>c.classNo===classNo);
+    if (row) row.uploadOpen = !open;
+  } else {
+    const { error } = await sb.from('class_settings').upsert({ class:classNo, upload_open:!open, updated_at:new Date().toISOString() }, { onConflict:'class' });
+    if (error) return alert('캡처 업로드 설정 실패: ' + error.message);
+  }
+  renderClasses();
+}
+
+async function toggleClass(classNo, open) {
+  if (!isAdmin) return;
+  if (TEST_MODE) {
+    const row = DEMO.classSettings.find(c=>c.classNo===classNo);
+    if (row) row.isOpen = !open;
+  } else {
+    const { error } = await sb.from('class_settings').upsert({ class:classNo, is_open:!open, updated_at:new Date().toISOString() }, { onConflict:'class' });
+    if (error) return alert('수행평가 공개 설정 실패: ' + error.message);
+  }
+  renderClasses();
+}
+
+async function getGradedRows() {
+  const [students, subs, questions, scores] = await Promise.all([adminStudents(), adminSubs(), adminQuestions(), adminScores()]);
+  const scoreMapBySub = {};
+  (scores||[]).forEach(sc => {
+    const sid = sc.submission_id || sc.submissionId;
+    if (!scoreMapBySub[sid]) scoreMapBySub[sid] = {};
+    scoreMapBySub[sid][sc.question_id || sc.questionId] = { score:sc.score, note:sc.note||'' };
+  });
+  const subByStudent = {};
+  subs.forEach(s => subByStudent[s.students?.student_id || s.studentNo] = s);
+  return students.map(st => {
+    const sub = subByStudent[st.student_id];
+    const scoreMap = sub ? (scoreMapBySub[sub.id]||{}) : {};
+    const g = sub ? gradeSubmission(sub, questions, scoreMap) : { total:null, detail:{} };
+    return { classNo:st.class, student_id:st.student_id, name:st.name, submission:sub, total:g.total, detail:g.detail, submittedAt:sub?(sub.submitted_at||sub.submittedAt):null, logCount:sub?(sub.tab_log_count||sub.logCount||0):0 };
+  });
+}
+
+async function renderSubs() {
+  const rows = await getGradedRows();
+  $('sec-submissions').innerHTML = `
+    <h2 class="page-title">제출 현황</h2>
+    <p class="page-desc">반별 확인, 정렬, 자동채점 결과와 수동 수정 점수를 확인합니다.</p>
+    <div class="card">
+      <div class="card-body">
+        <div class="table-toolbar">
+          <div class="field">
+            <label>반 필터</label>
+            <select id="filterClass" class="select" onchange="drawSubTable()" style="width:120px">
+              <option value="">전체</option>
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>정렬</label>
+            <select id="sortSub" class="select" onchange="drawSubTable()" style="width:160px">
+              <option value="student_id">학번순</option>
+              <option value="name">이름순</option>
+              <option value="score_desc">점수 높은순</option>
+              <option value="score_asc">점수 낮은순</option>
+              <option value="submitted_desc">제출시간 최신순</option>
+              <option value="submitted_asc">제출시간 오래된순</option>
+            </select>
+          </div>
+        </div>
+        <div id="subTable" class="table-wrap"></div>
+      </div>
+    </div>`;
+  window.__subRows = rows;
+  drawSubTable();
+}
+
+function drawSubTable() {
+  let rows = [...(window.__subRows||[])];
+  const cls  = $('filterClass')?.value||'';
+  const sort = $('sortSub')?.value||'student_id';
+  if (cls) rows = rows.filter(r => String(r.classNo)===String(cls));
+  rows.sort((a,b) => {
+    if (sort==='name')           return a.name.localeCompare(b.name,'ko');
+    if (sort==='score_desc')     return (b.total??-1)-(a.total??-1)||a.student_id.localeCompare(b.student_id);
+    if (sort==='score_asc')      return (a.total??999)-(b.total??999)||a.student_id.localeCompare(b.student_id);
+    if (sort==='submitted_desc') return new Date(b.submittedAt||0)-new Date(a.submittedAt||0);
+    if (sort==='submitted_asc')  return new Date(a.submittedAt||0)-new Date(b.submittedAt||0);
+    return a.student_id.localeCompare(b.student_id);
+  });
+  $('subTable').innerHTML = rows.length
+    ? `<table>
+        <thead><tr><th>반</th><th>학번</th><th>이름</th><th>최종점수</th><th>제출 시각</th><th>이탈</th><th>확인</th></tr></thead>
+        <tbody>${rows.map(r=>`
+          <tr>
+            <td>${r.classNo}반</td>
+            <td>${r.student_id}</td>
+            <td>${r.name}</td>
+            <td><span class="badge ${r.total===null?'yellow':'blue'}">${r.total===null?'미제출':r.total+'점'}</span></td>
+            <td>${r.submittedAt ? new Date(r.submittedAt).toLocaleString() : '-'}</td>
+            <td><span class="badge ${r.logCount?'red':'green'}">${r.logCount}회</span></td>
+            <td>${r.submission ? `<button class="btn btn-sm" onclick="openSubmission('${r.submission.id}')">보기</button>` : '-'}</td>
+          </tr>`).join('')}
+        </tbody>
+       </table>`
+    : '<div class="empty">조회 결과가 없습니다.</div>';
+}
+
+async function openSubmission(id) {
+  const rows = await getGradedRows();
+  const r = rows.find(x => x.submission?.id===id);
+  const qs = await adminQuestions();
+  if (!r) return alert('제출 정보를 찾을 수 없습니다.');
+  $('modalTitle').textContent = `${r.name} 제출 답안 · 최종 ${r.total}점`;
+  $('modalBody').innerHTML = `
+    <div class="notice info">주관식은 자동채점 결과가 기본으로 들어가며, 오타·유사답안 인정 또는 서술형 채점을 위해 문항별 점수를 직접 수정할 수 있습니다. 저장하면 제출현황과 엑셀 출력에 바로 반영됩니다.</div>
+    <div id="manualTotalBox" class="notice warn">현재 합계: <b>${r.total}점</b></div>
+    ${qs.map(q => {
+      const g = r.detail[q.id]||{};
+      const ans = r.submission.answers?.[q.id]||'';
+      return `
+      <div class="question" data-qid="${q.id}" data-max="${q.score}">
+        <div class="q-head">
+          <div class="q-no">${q.no}</div>
+          <div class="q-title">문제 ${q.no} · ${q.question_type==='essay'?'서술형':'주관식'}</div>
+          <div class="q-score"><span class="score-chip" id="score-chip-${q.id}">${g.earned||0} / ${q.score}점</span></div>
+        </div>
+        <div class="q-body">
+          <div class="answer-read">${esc(ans||'(미작성)')}</div>
+          <div class="answer-key">
+            <b>인정 답안:</b> ${q.question_type==='essay'?'서술형은 직접 채점':esc((q.accepted||[]).join(' / ')||'미입력')}<br>
+            <b>기본 판정:</b> <span style="color:${g.correct?'var(--green)':'var(--red)'};font-weight:700">${q.question_type==='essay'?'직접 채점 필요':(g.correct?'✔ 정답':'✘ 오답')}</span>
+            ${g.manual ? '<br><b>수동 수정:</b> 적용됨' : ''}
+          </div>
+          <div class="manual-score-box">
+            <div class="manual-score-grid">
+              <div class="field"><label>점수 수정</label><input class="input manual-score-input" id="manual-${q.id}" type="number" min="0" max="${q.score}" step="0.5" value="${g.earned||0}" oninput="updateManualTotalPreview()"></div>
+              <div class="field"><label>수정 사유/메모</label><input class="input" id="manual-note-${q.id}" value="${esc(g.note||'')}" placeholder="예: 오타 인정, 서술형 부분점수"></div>
+              <button class="btn btn-primary" onclick="saveManualScore('${r.submission.id}','${q.id}',${q.score})">저장</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}`;
+  $('modal').classList.add('on');
+  updateManualTotalPreview();
+}
+
+function updateManualTotalPreview() {
+  const inputs = Array.from(document.querySelectorAll('.manual-score-input'));
+  const questionTotal = inputs.reduce((sum, inp) => sum + (Number(inp.value)||0), 0);
+  const total = Math.min(MAX_TOTAL_SCORE, BASE_SCORE + questionTotal);
+  const box = $('manualTotalBox');
+  if (box) box.innerHTML = `현재 합계: <b>${total}점</b> <span style="font-size:12px;color:var(--text-3)">(기본 ${BASE_SCORE}점 + 문항 ${questionTotal}점, 최대 ${MAX_TOTAL_SCORE}점)</span>`;
+}
+
+async function saveManualScore(submissionId, questionId, maxScore) {
+  const input = $(`manual-${questionId}`);
+  const note = $(`manual-note-${questionId}`)?.value || '';
+  let score = Number(input?.value);
+  if (Number.isNaN(score)) return alert('점수를 숫자로 입력하세요.');
+  if (score < 0 || score > Number(maxScore||0)) return alert(`점수는 0점 이상 ${maxScore}점 이하로 입력하세요.`);
+  if (TEST_MODE) {
+    toast('TEST MODE: 점수 저장은 실제 DB에서 적용됩니다.');
+    return;
+  }
+  const { error } = await sb.from('submission_scores').upsert({ submission_id:submissionId, question_id:questionId, score, note, updated_at:new Date().toISOString() }, { onConflict:'submission_id,question_id' });
+  if (error) return alert('점수 저장 실패: ' + error.message);
+  toast('점수가 저장되었습니다.');
+  const rows = await getGradedRows();
+  window.__subRows = rows;
+  if ($('subTable')) drawSubTable();
+  await openSubmission(submissionId);
+}
+
+function renderExcelExport() {
+  $('sec-excel').innerHTML = `
+    <h2 class="page-title">엑셀 출력</h2>
+    <p class="page-desc">수행평가일람표 양식에 학번, 이름, 최종 점수를 입력해 전체 또는 반별로 다운로드합니다.</p>
+    <div class="card">
+      <div class="card-head"><div class="card-title">데이터과학 수행평가일람표 생성</div></div>
+      <div class="card-body">
+        <div class="notice info">
+          저장소에 <b>template.xlsx</b>가 있으면 자동으로 불러옵니다.
+          없으면 아래에서 직접 선택하세요.
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>반 선택</label>
+            <select id="excelClass" class="select">
+              <option value="">전체 반</option>
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>엑셀 양식 파일 직접 선택</label>
+            <input id="excelTemplate" class="input" type="file" accept=".xlsx">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="downloadExcel()">📥 선택한 범위 엑셀 다운로드</button>
+        <div id="excelMsg" class="alert"></div>
+      </div>
+    </div>`;
+}
+
+async function downloadExcel() {
+  const msg = $('excelMsg');
+  msg.className = 'alert on a-info';
+  msg.textContent = '엑셀 파일을 생성하는 중입니다...';
+  try {
+    const selectedClass = $('excelClass')?.value || '';
+    let rows = (await getGradedRows()).filter(r => !selectedClass || String(r.classNo)===String(selectedClass)).sort((a,b) => a.student_id.localeCompare(b.student_id));
+    let buf;
+    const f = $('excelTemplate')?.files?.[0];
+    if (f) {
+      buf = await f.arrayBuffer();
+    } else {
+      const res = await fetch('template.xlsx', { cache:'no-store' });
+      if (!res.ok) throw new Error('template.xlsx를 찾을 수 없습니다. 양식 파일을 직접 선택하세요.');
+      buf = await res.arrayBuffer();
+    }
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buf);
+    const ws = workbook.worksheets[0];
+    const statRow  = findRowByFirstCell(ws, '총');
+    const dataStart = 4;
+    let dataEnd = (statRow ? statRow-1 : 38);
+    if (rows.length > dataEnd-dataStart+1) {
+      const extra = rows.length-(dataEnd-dataStart+1);
+      ws.spliceRows(dataEnd+1, 0, ...Array.from({length:extra}, ()=>[]));
+      for (let i=0; i<extra; i++) copyRowStyle(ws, dataEnd, dataEnd+1+i);
+      dataEnd += extra;
+    }
+    for (let r=dataStart; r<=dataEnd; r++) {
+      ['B','C','F','G'].forEach(c => { ws.getCell(`${c}${r}`).value = null; });
+    }
+    rows.forEach((row,i) => {
+      const r = dataStart+i;
+      ws.getCell(`A${r}`).value = i+1;
+      ws.getCell(`B${r}`).value = row.student_id;
+      ws.getCell(`C${r}`).value = row.name;
+      ws.getCell(`F${r}`).value = row.total===null ? null : row.total;
+      ws.getCell(`G${r}`).value = '재학';
+    });
+    const last   = dataStart+rows.length-1;
+    const totalR = findRowByFirstCell(ws,'총')  || dataEnd+1;
+    const avgR   = findRowByFirstCell(ws,'평')  || totalR+1;
+    const countR = findRowByFirstCell(ws,'응시') || avgR+1;
+    if (rows.length) {
+      ws.getCell(`F${totalR}`).value = { formula:`SUM(F${dataStart}:F${last})` };
+      ws.getCell(`F${avgR}`).value   = { formula:`IFERROR(AVERAGE(F${dataStart}:F${last}),0)` };
+      ws.getCell(`F${countR}`).value = { formula:`COUNT(F${dataStart}:F${last})` };
+    }
+    const out  = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = `데이터과학_수행평가일람표_${selectedClass ? selectedClass+'반_' : '전체_'}최종점수.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    msg.className = 'alert on a-ok';
+    msg.textContent = '다운로드가 완료되었습니다.';
+  } catch(e) {
+    msg.className = 'alert on a-err';
+    msg.textContent = '엑셀 생성 실패: ' + e.message;
+  }
+}
+
+function findRowByFirstCell(ws, term) {
+  for (let r=1; r<=ws.rowCount; r++) {
+    if (String(ws.getCell(`A${r}`).value||'').trim().includes(term)) return r;
+  }
+  return null;
+}
+function copyRowStyle(ws, from, to) {
+  const s = ws.getRow(from), d = ws.getRow(to);
+  d.height = s.height;
+  s.eachCell({ includeEmpty:true }, (cell,col) => {
+    d.getCell(col).style    = JSON.parse(JSON.stringify(cell.style||{}));
+    d.getCell(col).numFmt   = cell.numFmt;
+    d.getCell(col).alignment = cell.alignment;
+    d.getCell(col).border   = cell.border;
+    d.getCell(col).fill     = cell.fill;
+    d.getCell(col).font     = cell.font;
+  });
+}
+
+async function renderPreview() {
+  const qs = (await adminQuestions()).filter(q => q.is_active !== false).sort((a,b)=>a.no-b.no);
+  $('sec-preview').innerHTML = `
+    <h2 class="page-title">수행평가 미리보기</h2>
+    <p class="page-desc">학생에게 보일 문제 화면을 관리자 화면에서 확인하고 바로 수정할 수 있습니다.</p>
+    <div class="preview-toolbar">
+      <span class="badge blue">활성 문제 ${qs.length}개</span>
+      <button class="btn" onclick="showAdmin('questions')">문제 관리로 이동</button>
+    </div>
+    <div class="preview-student-frame">
+      <div class="notice warn">학생 화면 미리보기입니다. 실제 제출 기능은 비활성화되어 있습니다.</div>
+      ${qs.length ? qs.map(q=>`
+        <div class="question">
+          <div class="q-head">
+            <div class="q-no">${q.no}</div>
+            <div class="q-title">문제 ${q.no}</div>
+            <div class="q-score">${q.score}점 · ${q.question_type==='essay'?'서술형':'주관식'}</div>
+          </div>
+          <div class="q-body">
+            <div class="q-text">${esc(q.text)}</div>
+            ${q.imageUrl ? `<img class="q-img" src="${q.imageUrl}">` : ''}
+            <textarea class="answer" disabled placeholder="학생 답안 작성 칸"></textarea>
+            <div style="margin-top:10px"><button class="btn btn-sm" onclick="editQuestion('${q.id}')">이 문제 수정</button></div>
+          </div>
+        </div>`).join('') : '<div class="empty">활성화된 문제가 없습니다.</div>'}
+    </div>`;
+}
+
+async function renderUploadPhotos() {
+  const rows = await adminStudentImages();
+  $('sec-uploadphotos').innerHTML = `
+    <h2 class="page-title">업로드 사진 확인</h2>
+    <p class="page-desc">반별로 학생들이 업로드한 캡처 사진을 학번순으로 확인합니다. 이상한 사진이나 AI 캡처는 관리자가 바로 삭제할 수 있습니다.</p>
+    <div class="card">
+      <div class="card-body">
+        <div class="table-toolbar">
+          <div class="field">
+            <label>반 필터</label>
+            <select id="photoFilterClass" class="select" onchange="drawUploadPhotoRows()" style="width:120px">
+              <option value="">전체</option>
+              ${CLASS_LIST.map(c=>`<option value="${c}">${c}반</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="uploadPhotoList"></div>
+      </div>
+    </div>`;
+  window.__uploadPhotoRows = rows;
+  drawUploadPhotoRows();
+}
+
+function drawUploadPhotoRows() {
+  let rows = [...(window.__uploadPhotoRows||[])];
+  const cls = $('photoFilterClass')?.value || '';
+  if (cls) rows = rows.filter(r => String(r.class)===String(cls));
+  rows.sort((a,b)=>String(a.class).localeCompare(String(b.class),'ko',{numeric:true})||String(a.student_id).localeCompare(String(b.student_id),'ko',{numeric:true}));
+  $('uploadPhotoList').innerHTML = rows.length ? rows.map(r=>`
+    <div class="photo-row">
+      <div><b>${r.class}반</b></div>
+      <div>${r.student_id}</div>
+      <div>${r.name}</div>
+      <div class="photo-strip">
+        ${Array.from({length:10}, (_,i)=>{
+          const im = (r.images||[])[i];
+          return im ? `<div class="photo-slot" style="position:relative"><img src="${im.url}" onclick="openFs('${im.url}')" title="${r.name} 캡처 ${i+1}"><button class="thumb-del" style="right:3px;top:3px;width:20px;height:20px;font-size:11px" title="관리자 삭제" onclick="event.stopPropagation();adminDeleteStudentImage('${im.id}','${im.path||''}','${esc(r.name)}',${i+1})">×</button></div>` : `<div class="photo-slot">${i+1}</div>`;
+        }).join('')}
+      </div>
+    </div>`).join('') : '<div class="empty">조회 결과가 없습니다.</div>';
+}
+
+
+async function adminDeleteStudentImage(imageId, path, studentName, idx) {
+  if (!isAdmin) return;
+  if (!confirm(`${studentName} 학생의 캡처 ${idx}번 이미지를 삭제할까요?
+삭제 후에는 복구할 수 없습니다.`)) return;
+  if (TEST_MODE) {
+    Object.keys(DEMO.images).forEach(k => { DEMO.images[k] = (DEMO.images[k]||[]).filter(x => x.id !== imageId); });
+    toast('이미지가 삭제되었습니다.');
+    return renderUploadPhotos();
+  }
+  if (path) {
+    const { error: stErr } = await sb.storage.from('student-images').remove([path]);
+    if (stErr) return alert('스토리지 이미지 삭제 실패: ' + stErr.message);
+  }
+  const { error: dbErr } = await sb.from('student_images').delete().eq('id', imageId);
+  if (dbErr) return alert('이미지 정보 삭제 실패: ' + dbErr.message);
+  toast('이미지가 삭제되었습니다.');
+  renderUploadPhotos();
+}
+
+async function renderLogs() {
+  const logs = await adminLogs();
+  $('sec-logs').innerHTML = `
+    <h2 class="page-title">이탈 로그</h2>
+    <p class="page-desc">평가 중 감지된 이탈 기록입니다.</p>
+    ${logs.length
+      ? `<div class="card">
+           <div class="card-body table-wrap">
+             <table>
+               <thead><tr><th>시간</th><th>반</th><th>학번</th><th>이름</th><th>유형</th><th>내용</th></tr></thead>
+               <tbody>${logs.map(l=>`
+                 <tr>
+                   <td>${new Date(l.detected_at||l.time).toLocaleString()}</td>
+                   <td>${l.students?.class||l.classNo||l.class||'-'}반</td>
+                   <td>${l.students?.student_id||l.studentNo||'-'}</td>
+                   <td>${l.students?.name||l.name||l.student_name||'-'}</td>
+                   <td>${l.type||'-'}</td>
+                   <td>${l.message||l.msg||''}</td>
+                 </tr>`).join('')}
+               </tbody>
+             </table>
+           </div>
+         </div>`
+      : '<div class="empty">아직 이탈 로그가 없습니다.</div>'}`;
+}
+
+async function renderStudents() {
+  const st = await adminStudents();
+  $('sec-students').innerHTML = `
+    <h2 class="page-title">학생 관리</h2>
+    <p class="page-desc">가입한 학생의 이름과 반을 수정하거나 계정을 삭제합니다.</p>
+    <div class="notice warn">삭제 시 로그인 계정도 함께 삭제됨 · 단순 이름 오타는 삭제하지 말고 수정 기능을 사용하세요.</div>
+    <div class="card">
+      <div class="card-body table-wrap">
+        <table>
+          <thead><tr><th>반</th><th>학번</th><th>이름</th><th>수정</th><th>삭제</th></tr></thead>
+          <tbody>${st.map(s=>`
+            <tr>
+              <td>
+                <select id="stu-class-${s.id}" class="select" style="width:90px">
+                  ${CLASS_LIST.map(c=>`<option value="${c}" ${String(s.class)===String(c)?'selected':''}>${c}반</option>`).join('')}
+                </select>
+              </td>
+              <td>${s.student_id}</td>
+              <td><input id="stu-name-${s.id}" class="input" style="min-width:120px" value="${esc(s.name)}"></td>
+              <td><button class="btn btn-primary btn-sm" onclick="updateStudent('${s.id}')">수정 저장</button></td>
+              <td>
+                <button class="btn btn-red btn-sm" onclick="deleteStudent('${s.id}')">삭제</button>
+                <div class="hint">삭제 시 로그인 계정도 함께 삭제됨</div>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function updateStudent(id) {
+  if (!isAdmin) return;
+  const name = $(`stu-name-${id}`)?.value.trim();
+  const cls  = $(`stu-class-${id}`)?.value;
+  if (!name) return alert('이름을 입력하세요.');
+  if (TEST_MODE) {
+    const u = DEMO.users.find(x=>x.id===id);
+    if (u) { u.name = name; u.classNo = cls; }
+    toast('학생 정보가 수정되었습니다.');
+    return renderStudents();
+  }
+  const { error } = await sb.from('students').update({ name, class:cls }).eq('id', id);
+  if (error) return alert('학생 정보 수정 실패: ' + error.message);
+  toast('학생 정보가 수정되었습니다.');
+  renderStudents();
+}
+
+async function deleteStudent(id) {
+  if (!confirm('학생을 삭제하시겠습니까?
+삭제 시 로그인 계정도 함께 삭제되어 같은 학번으로 재가입할 수 있습니다.')) return;
+  if (TEST_MODE) { DEMO.users = DEMO.users.filter(u=>u.id!==id); toast('학생이 삭제되었습니다.'); return renderStudents(); }
+  const { data, error } = await sb.rpc('admin_delete_student', { p_student_id:id });
+  if (error) return alert('학생 삭제 실패: ' + error.message + '
+SQL migration이 적용되었는지 확인하세요.');
+  toast(data || '학생 계정이 삭제되었습니다.');
+  renderStudents();
+}
+
+function closeModal() { $('modal').classList.remove('on'); }
+</script>
+</body>
+</html>
