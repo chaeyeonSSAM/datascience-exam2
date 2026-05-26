@@ -2442,12 +2442,10 @@ async function updateStudent(id) {
 }
 
 async function deleteStudent(id) {
-  if (!confirm('학생을 삭제하시겠습니까?
-삭제 시 로그인 계정도 함께 삭제되어 같은 학번으로 재가입할 수 있습니다.')) return;
+  if (!confirm('학생을 삭제하시겠습니까?\n삭제 시 로그인 계정도 함께 삭제되어 같은 학번으로 재가입할 수 있습니다.')) return;
   if (TEST_MODE) { DEMO.users = DEMO.users.filter(u=>u.id!==id); toast('학생이 삭제되었습니다.'); return renderStudents(); }
   const { data, error } = await sb.rpc('admin_delete_student', { p_student_id:id });
-  if (error) return alert('학생 삭제 실패: ' + error.message + '
-SQL migration이 적용되었는지 확인하세요.');
+  if (error) return alert('학생 삭제 실패: ' + error.message + '\nSQL migration이 적용되었는지 확인하세요.');
   toast(data || '학생 계정이 삭제되었습니다.');
   renderStudents();
 }
