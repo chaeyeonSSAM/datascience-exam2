@@ -462,13 +462,16 @@ function gradeOne(studentAnswer, accepted, questionType='short') {
   const ok = (accepted||[]).some(a => normalizeAnswer(a) === n);
   return { correct: ok, studentAnswer: studentAnswer||'', accepted: accepted||[] };
 }
-function gradeSubmission(sub, questions) {
+function gradeSubmission(sub, questions, overrides={}) {
+  // overrides: { [questionId]: true }  → 교사가 수동으로 정답 처리한 문항
   const detail = {};
   let correctCount = 0;
   (questions||[]).forEach(q => {
     const g = gradeOne(sub?.answers?.[q.id]||'', q.accepted||[], q.question_type||'short');
-    detail[q.id] = g;
-    if (g.correct) correctCount++;
+    const manualCorrect = !!(overrides[q.id]);
+    const finalCorrect = g.correct || manualCorrect;
+    detail[q.id] = { ...g, correct: finalCorrect, manualCorrect };
+    if (finalCorrect) correctCount++;
   });
   const total = calcTotalScore(correctCount);
   return { total, correctCount, detail };
@@ -1258,13 +1261,29 @@ async function toggleClass(classNo, open) {
   renderClasses();
 }
 
+async function adminOverrides() {
+  // submission_overrides 테이블: { submission_id, question_id }
+  if (TEST_MODE) return window.__demoOverrides || [];
+  const { data } = await sb.from('submission_overrides').select('*');
+  return data || [];
+}
+
 async function getGradedRows() {
-  const [students, subs, questions] = await Promise.all([adminStudents(), adminSubs(), adminQuestions()]);
+  const [students, subs, questions, overrideRows] = await Promise.all([
+    adminStudents(), adminSubs(), adminQuestions(), adminOverrides()
+  ]);
+  // overrideRows → { [submissionId]: { [questionId]: true } }
+  const overrideMap = {};
+  (overrideRows||[]).forEach(o => {
+    if (!overrideMap[o.submission_id]) overrideMap[o.submission_id] = {};
+    overrideMap[o.submission_id][o.question_id] = true;
+  });
   const subByStudent = {};
   subs.forEach(s => subByStudent[s.students?.student_id || s.studentNo] = s);
   return students.map(st => {
     const sub = subByStudent[st.student_id];
-    const g = sub ? gradeSubmission(sub, questions) : { total:null, correctCount:0, detail:{} };
+    const overrides = sub ? (overrideMap[sub.id] || {}) : {};
+    const g = sub ? gradeSubmission(sub, questions, overrides) : { total:null, correctCount:0, detail:{} };
     return { classNo:st.class, student_id:st.student_id, name:st.name, submission:sub, total:g.total, correctCount:g.correctCount||0, detail:g.detail, submittedAt:sub?(sub.submitted_at||sub.submittedAt):null, logCount:sub?(sub.tab_log_count||sub.logCount||0):0 };
   });
 }
@@ -1340,22 +1359,42 @@ async function openSubmission(id) {
   const r = rows.find(x => x.submission?.id===id);
   const qs = await adminQuestions();
   if (!r) return alert('제출 정보를 찾을 수 없습니다.');
+  window.__currentSubId = id;
+  _renderSubmissionModal(r, qs);
+  $('modal').classList.add('on');
+}
+
+function _renderSubmissionModal(r, qs) {
   $('modalTitle').textContent = r.name + ' 제출 답안 · 정답 ' + (r.correctCount||0) + '개 · 최종 ' + r.total + '점';
   $('modalBody').innerHTML = `
-    <div class="notice info">맞춘 문제 수에 따라 점수가 자동 계산됩니다. 인정 답안 추가는 문제 관리에서 수정하세요.</div>
-    <div class="notice warn">정답 <b>${r.correctCount||0}개 / 20문제</b> → 최종 <b>${r.total}점</b></div>
+    <div class="notice info">오답으로 표시된 문항을 정답으로 처리할 수 있습니다. 정답 수에 따라 점수가 자동 재계산됩니다.</div>
+    <div id="submissionScoreBanner" class="notice warn" style="font-size:15px">
+      정답 <b>${r.correctCount||0}개 / 20문제</b> &nbsp;→&nbsp; 최종 <b>${r.total}점</b>
+    </div>
     ${qs.map(q => {
       const g = r.detail[q.id]||{};
       const ans = r.submission?.answers?.[q.id]||'';
+      const isCorrect = g.correct;
+      const isManual  = g.manualCorrect;
       return `
-      <div class="question">
+      <div class="question" id="q-block-${q.id}">
         <div class="q-head">
           <div class="q-no">${q.no}</div>
           <div class="q-title">문제 ${q.no}</div>
-          <div class="q-score">
-            <span style="color:${g.correct?'var(--green)':'var(--red)'};font-weight:700;font-size:14px">
-              ${g.correct ? '✔ 정답' : '✘ 오답'}
+          <div class="q-score" style="display:flex;align-items:center;gap:8px">
+            <span id="q-status-${q.id}" style="color:${isCorrect?'var(--green)':'var(--red)'};font-weight:700;font-size:14px">
+              ${isCorrect ? (isManual ? '✔ 정답 (수동)' : '✔ 정답') : '✘ 오답'}
             </span>
+            ${!isCorrect ? `
+              <button class="btn btn-green btn-sm" id="q-btn-${q.id}"
+                onclick="toggleOverride('${r.submission.id}','${q.id}',true)">
+                정답 처리
+              </button>` : (isManual ? `
+              <button class="btn btn-sm" id="q-btn-${q.id}"
+                onclick="toggleOverride('${r.submission.id}','${q.id}',false)"
+                style="border-color:var(--green);color:var(--green)">
+                정답 취소
+              </button>` : '')}
           </div>
         </div>
         <div class="q-body">
@@ -1366,7 +1405,40 @@ async function openSubmission(id) {
         </div>
       </div>`;
     }).join('')}`;
-  $('modal').classList.add('on');
+}
+
+async function toggleOverride(submissionId, questionId, add) {
+  if (TEST_MODE) {
+    if (!window.__demoOverrides) window.__demoOverrides = [];
+    if (add) {
+      const exists = window.__demoOverrides.some(o => o.submission_id===submissionId && o.question_id===questionId);
+      if (!exists) window.__demoOverrides.push({ submission_id:submissionId, question_id:questionId });
+    } else {
+      window.__demoOverrides = window.__demoOverrides.filter(
+        o => !(o.submission_id===submissionId && o.question_id===questionId)
+      );
+    }
+  } else {
+    if (add) {
+      const { error } = await sb.from('submission_overrides')
+        .upsert({ submission_id:submissionId, question_id:questionId }, { onConflict:'submission_id,question_id' });
+      if (error) return alert('정답 처리 실패: ' + error.message);
+    } else {
+      const { error } = await sb.from('submission_overrides')
+        .delete().eq('submission_id', submissionId).eq('question_id', questionId);
+      if (error) return alert('정답 취소 실패: ' + error.message);
+    }
+  }
+  toast(add ? '✔ 정답으로 처리되었습니다.' : '정답 처리가 취소되었습니다.');
+  // 모달 내용만 새로 고침 (모달 닫지 않음)
+  const rows = await getGradedRows();
+  const r = rows.find(x => x.submission?.id===submissionId);
+  const qs = await adminQuestions();
+  if (!r) return;
+  _renderSubmissionModal(r, qs);
+  // 제출현황 테이블도 백그라운드 업데이트
+  window.__subRows = rows;
+  if ($('subTable')) drawSubTable();
 }
 
 
