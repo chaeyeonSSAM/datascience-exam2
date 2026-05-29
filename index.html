@@ -1023,6 +1023,7 @@ async function renderDashboard() {
   const [st, subs, cls, logs, q, gradedRows] = await Promise.all([adminStudents(), adminSubs(), adminClasses(), adminLogs(), adminQuestions(), getGradedRows()]);
   const submittedRows = gradedRows.filter(r => r.total !== null);
   const avg = submittedRows.length ? (submittedRows.reduce((a,b)=>a+Number(b.total||0),0)/submittedRows.length).toFixed(1) : '0.0';
+  const avgCorrect = submittedRows.length ? (submittedRows.reduce((a,b)=>a+Number(b.correctCount||0),0)/submittedRows.length).toFixed(1) : '0.0';
   $('sec-dashboard').innerHTML = `
     <h2 class="page-title">관리자 대시보드</h2>
     <p class="page-desc">수행평가 전체 현황입니다.</p>
