@@ -11,7 +11,7 @@
 Supabase > Authentication > Users에서 `admin@gwangmun.edu`를 삭제 후 다시 Add user로 생성하세요.
 
 - Email: admin@gwangmun.edu
-- Password: gm11154
+- Password: 
 - Auto Confirm 또는 Confirm user 처리
 
 그리고 GitHub Pages에 `index.html`을 다시 업로드한 뒤 Ctrl+F5 또는 주소 뒤에 `?v=adminfix1`을 붙여 접속하세요.
